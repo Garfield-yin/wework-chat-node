@@ -1,0 +1,28 @@
+{
+  "name": "wework-chat-node",
+  "version": "0.0.1",
+  "description": "WeWorkFinanceSdk node c++ addon",
+  "main": "index.js",
+  "gypfile": true,
+  "author": "Garfield Yin",
+    "repository": {
+    "type": "git",
+    "url": "https://github.com/open-node/open-rest.git"
+  },
+  "keywords": [
+    "WeWorkFinanceSdk",
+    "get Chat data"
+  ],
+  "license": "MIT",
+  "scripts": {
+    "prebenchmark": "node-gyp build",
+    "pretest-server": "node-gyp build"
+  },
+  "engines": {
+    "node": "~10 >=10.20 || >=12.17"
+  },
+  "dependencies": {
+    "bindings": "~1.2.1",
+    "node-addon-api": "^3.0.0"
+  }
+}

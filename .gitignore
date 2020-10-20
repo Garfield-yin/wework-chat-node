@@ -1,0 +1,13 @@
+.DS_Store
+logs
+
+build/Release
+
+# Dependency directories
+node_modules/
+jspm_packages/
+
+# front end build
+build/
+dist
+
