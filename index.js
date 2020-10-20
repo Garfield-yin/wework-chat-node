@@ -1,3 +1,3 @@
-const addon = require('bindings')('wework')
+const addon = require('bindings')('wework');
 
-module.exports = addon
+module.exports = addon;
