@@ -20,7 +20,7 @@ npm install wework-chat-node
 
 const FileType = require('file-type');
 const fs = require('fs');
-var addon = require('wework-chat-node')('wework');
+var addon = require('wework-chat-node');
 
 // 创建 sdk 对象
 var wework = new addon.WeWorkChat({
