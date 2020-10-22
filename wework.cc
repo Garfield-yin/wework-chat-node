@@ -307,6 +307,9 @@ Napi::Value WeWorkChat::GetMediaData(const Napi::CallbackInfo& info) {
             cb.Call(env.Global(), {Napi::String::New(env, "GetMediaData err")});
             return Napi::Number::New(env,-1);
         } else{
+            char errMsg[128];
+            sprintf(errMsg, "Get media data error,errorcode:%d", ret);
+            Napi::Error::New(env, errMsg).ThrowAsJavaScriptException();
             return env.Null();
         }
         
@@ -317,7 +320,7 @@ Napi::Value WeWorkChat::GetMediaData(const Napi::CallbackInfo& info) {
     //printf("content size:%d isfin:%d outindex:%s index_len:%d\n",media_data_len, is_finish,out_index_buf,index_len);
     //char* media_data = ::GetData(media);
     std:: string out_index_buf = "";
-    static Napi::ArrayBuffer buf_data = Napi::ArrayBuffer::New(env, GetData(media), GetDataLen(media),MediaDataFinalizerCallback,media);
+    Napi::ArrayBuffer buf_data = Napi::ArrayBuffer::New(env, GetData(media), GetDataLen(media),MediaDataFinalizerCallback,media);
     bool is_finish;
     if(IsMediaDataFinish(media)==1)
     {
