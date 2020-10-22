@@ -160,11 +160,24 @@ void* WeWorkChat::fetchData(TsfnContext *context, void *this__) {
         // 微信限制频率为最高100ms/每次
         std::this_thread::sleep_for(std::chrono::milliseconds(150));
 
-        int ret = 0;
+    
 
         Slice_t *chatDatas = NewSlice();
         // getchatdata api
-        ret = GetChatData(this_->sdk_, this_->seq_, max_results, "", "", 30, chatDatas);
+        const int numOfRetries = 3;
+        int cnt = 1;
+        int ret = 0;
+        do {
+            ret = GetChatData(this_->sdk_, this_->seq_, max_results, "", "", 30, chatDatas);
+            if   (ret >= 10001 && ret <= 10003){
+                cout << "\t try number#" << cnt <<" fail \n";
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+                ++cnt;
+            } else{
+                break;
+            }
+        }while (cnt <= numOfRetries);
+        
         if (ret != 0)
         {
             printf("GetChatData err ret:%d\n", ret);
@@ -299,7 +312,20 @@ Napi::Value WeWorkChat::GetMediaData(const Napi::CallbackInfo& info) {
     // 记得释放
     MediaData_t* media = NewMediaData();
     
-    int ret = ::GetMediaData(this->sdk_, index_buf.c_str(),sdk_fileid.c_str(), "", "",30, media);
+    const int numOfRetries = 3;
+    int cnt = 1;
+    int ret = 0;
+    do {
+        ret = ::GetMediaData(this->sdk_, index_buf.c_str(),sdk_fileid.c_str(), "", "",30, media);
+        if (ret >= 10001 && ret <= 10003){
+            cout << "\t try number#" << cnt <<" fail \n";
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            ++cnt;
+        } else{
+            break;
+        }
+    }while (cnt <= numOfRetries);
+  
     if (ret != 0) {
         printf("GetMediaData err ret:%d\n", ret);
         ::FreeMediaData(media);
