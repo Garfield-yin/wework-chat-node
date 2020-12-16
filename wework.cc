@@ -44,6 +44,8 @@ int64_t WeWorkChat::seq_;
 bool WeWorkChat::end_;
 std::mutex WeWorkChat::mtx_;
 
+std::string ERROR_PREFIX = "WEWORK_CHAT_NODE::";
+
 //// thread/////
 void FinalizerCallback(Napi::Env env, void *finalizeData, TsfnContext *context);
 // The thread-safe function finalizer callback. This callback executes
@@ -102,7 +104,7 @@ int WeWorkChat::initSdk(const Napi::CallbackInfo& info){
     ret = ::Init(this->sdk_, this->corpid_.c_str(), this->secret_.c_str());
     if (ret != 0)
     {
-        printf("init sdk err ret:%d\n", ret);
+        printf("%sinit sdk err ret:%d\n", ERROR_PREFIX.c_str(), ret);
         Napi::TypeError::New(info.Env(), "Init WeWorkFinance sdk error.")
             .ThrowAsJavaScriptException();
         return  -1;
@@ -127,7 +129,9 @@ WeWorkChat::WeWorkChat(const Napi::CallbackInfo& info)
         this->secret_ = obj.Get("secret").ToString();
         this->private_key_ = obj.Get("private_key").ToString();
         this->seq_ = obj.Get("seq").ToNumber();
-        cout <<"corpid:"<< this->corpid_<<",secret:"<< this->secret_<<",seq:"<<this->seq_ << endl;
+        
+        //cout <<"corpid:"<< this->corpid_<<",secret:"<< this->secret_<<",seq:"<<this->seq_ << endl;
+        
         this->end_ = false;
         this->initSdk(info);
 }
@@ -154,13 +158,12 @@ void* WeWorkChat::fetchData(TsfnContext *context, void *this__) {
     
     while (true) {
         if (this_->end_){
-            cout << "end fetch data:"<<this_->seq_<< endl;
+            cout << "End fetch data:"<<this_->seq_<< endl;
             break;
         }
         // 微信限制频率为最高100ms/每次
         std::this_thread::sleep_for(std::chrono::milliseconds(150));
 
-    
 
         Slice_t *chatDatas = NewSlice();
         // getchatdata api
@@ -170,7 +173,7 @@ void* WeWorkChat::fetchData(TsfnContext *context, void *this__) {
         do {
             ret = GetChatData(this_->sdk_, this_->seq_, max_results, "", "", 30, chatDatas);
             if   (ret >= 10001 && ret <= 10003){
-                cout << "\t try number#" << cnt <<" fail \n";
+                //cout << "\t try number#" << cnt <<" fail \n";
                 std::this_thread::sleep_for(std::chrono::seconds(1));
                 ++cnt;
             } else{
@@ -180,10 +183,9 @@ void* WeWorkChat::fetchData(TsfnContext *context, void *this__) {
         
         if (ret != 0)
         {
-            printf("GetChatData err ret:%d\n", ret);
+            printf("%sGetChatData err ret:%d\n",ERROR_PREFIX.c_str(), ret);
             continue;
         }
-        printf("GetChatData len:%d \n", chatDatas->len);
         
         char *data = GetContentFromSlice(chatDatas);
         
@@ -215,7 +217,7 @@ Napi::Value WeWorkChat::StartFetchData(const Napi::CallbackInfo& info) {
                                   FinalizerCallback, // Finalizer
                                   (void *)nullptr    // Finalizer data
           );
-      testData->nativeThread = std::thread(fetchData, testData,this);
+      testData->nativeThread = std::thread(fetchData, testData, this);
     
       return testData->deferred.Promise();
 }
@@ -229,8 +231,8 @@ int64_t WeWorkChat::parseJsonData(TsfnContext *context,const char *data){
     rapidjson::Document doc;
     if (doc.Parse(data).HasParseError())
     {
-        printf("parse json data error,data:%s\n", data);
-        printf("parse error: (%d:%zu)%s\n", doc.GetParseError(), doc.GetErrorOffset(), rapidjson::GetParseError_En(doc.GetParseError()));
+        printf("%sparse json data error,data:%s\n",ERROR_PREFIX.c_str(), data);
+        printf("%sparse error: (%d:%zu)%s\n", ERROR_PREFIX.c_str(), doc.GetParseError(), doc.GetErrorOffset(), rapidjson::GetParseError_En(doc.GetParseError()));
 
         return -1;
     }
@@ -240,18 +242,18 @@ int64_t WeWorkChat::parseJsonData(TsfnContext *context,const char *data){
         if (errcode != 0)
         {
             string errMsg = doc["errmsg"].GetString();
-            printf("get chat message error:%s.\n", errMsg.c_str());
+            printf("%sget chat message error:%s.\n",ERROR_PREFIX.c_str(), errMsg.c_str());
             return -1;
         }
     }
     const rapidjson::Value &chatData = doc["chatdata"];
-    cout << "char data size:"<< chatData.Size()<<endl;
+  
     for (SizeType i = 0; i < chatData.Size(); ++i)
     {
         int64_t seq = chatData[i]["seq"].GetInt64();
         this->mtx_.lock();
         this->seq_ = seq;
-        cout << "data seq: " << seq << endl;
+        // cout << "data seq: " << seq << endl;
         this->mtx_.unlock();
         string encryptRandomKey = chatData[i]["encrypt_random_key"].GetString();
         //cout << "encrypt_random_key: " << encryptRandomKey << endl;
@@ -266,10 +268,15 @@ int64_t WeWorkChat::parseJsonData(TsfnContext *context,const char *data){
             continue;
         }
         Slice_t *slice_msg = NewSlice();
+        
         int ret = DecryptData(encrypt_key.c_str(), encryptChatMsg.c_str(), slice_msg);
-        cout << "DecryptData ret: " << ret << endl;
-        int64_t msg_len = GetSliceLen(slice_msg);
-        cout << "msg_len: " << msg_len << endl;
+        if (ret != 0){
+            cout << ERROR_PREFIX <<"Decrypt Data error:"<<ret<< endl;
+            continue;
+        }
+        //cout << "DecryptData ret: " << ret << endl;
+        //int64_t msg_len = GetSliceLen(slice_msg);
+        //cout << "msg_len: " << msg_len << endl;
         
         char *msg_data = GetContentFromSlice(slice_msg);
         MsgData *theData = new MsgData();
@@ -327,7 +334,7 @@ Napi::Value WeWorkChat::GetMediaData(const Napi::CallbackInfo& info) {
     }while (cnt <= numOfRetries);
   
     if (ret != 0) {
-        printf("GetMediaData err ret:%d\n", ret);
+        printf("%sGetMediaData err ret:%d\n",ERROR_PREFIX.c_str(), ret);
         ::FreeMediaData(media);
         if (isCbFunction){
             cb.Call(env.Global(), {Napi::String::New(env, "GetMediaData err")});
@@ -388,7 +395,7 @@ std::string rsa_pri_decrypt(const std::string &cipherText,const char *priKey)
     rsa = PEM_read_bio_RSAPrivateKey(keybio, &rsa, NULL, NULL);
     if(rsa == NULL)
     {
-        printf( "Failed to create RSA.\n");
+        printf("%sERROR_PREFIXFailed to create RSA.\n",ERROR_PREFIX.c_str());
         return "";
     }
     int len = RSA_size(rsa);
@@ -422,7 +429,7 @@ std::string decode64(const std::string &ascdata)
          continue;
       }
       if ((c > 127) || (c < 0) || (reverse_table[c] > 63)) {
-         printf("This contains characters not legal in a base64 encoded string.\n");
+         printf("%sThis contains characters not legal in a base64 encoded string.\n",ERROR_PREFIX.c_str());
          return "";
       }
       accumulator = (accumulator << 6) | reverse_table[c];
