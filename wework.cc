@@ -38,11 +38,11 @@
 using namespace std;
 using namespace rapidjson;
 
-WeWorkFinanceSdk_t *WeWorkChat::sdk_;
-std::string WeWorkChat::private_key_;
-int64_t WeWorkChat::seq_;
-bool WeWorkChat::end_;
-std::mutex WeWorkChat::mtx_;
+//WeWorkFinanceSdk_t *WeWorkChat::sdk_;
+//std::string WeWorkChat::private_key_;
+//int64_t WeWorkChat::seq_;
+//bool WeWorkChat::end_;
+//std::mutex WeWorkChat::mtx_;
 
 std::string ERROR_PREFIX = "WEWORK_CHAT_NODE::";
 
@@ -140,7 +140,7 @@ WeWorkChat::WeWorkChat(const Napi::CallbackInfo& info)
 Napi::Value WeWorkChat::EndFetchData(const Napi::CallbackInfo& info) {
     this->end_ = true;
     // sleep 一下，确保正在执行的线程执行完毕
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    std::this_thread::sleep_for(std::chrono::milliseconds(800));
     // sdk 由用户手动释放
     DestroySdk(this->sdk_);
     return Napi::Number::New(info.Env(), this->seq_);
@@ -163,7 +163,6 @@ void* WeWorkChat::fetchData(TsfnContext *context, void *this__) {
         }
         // 微信限制频率为最高100ms/每次
         std::this_thread::sleep_for(std::chrono::milliseconds(150));
-
 
         Slice_t *chatDatas = NewSlice();
         // getchatdata api
@@ -195,7 +194,6 @@ void* WeWorkChat::fetchData(TsfnContext *context, void *this__) {
         }
         
         FreeSlice(chatDatas);
-        
     }
     
     context->tsfn.Release();
@@ -204,22 +202,22 @@ void* WeWorkChat::fetchData(TsfnContext *context, void *this__) {
 
 Napi::Value WeWorkChat::StartFetchData(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
-    auto testData = new TsfnContext(env);
+    auto tsContext = new TsfnContext(env);
 
       // Create a new ThreadSafeFunction.
-      testData->tsfn =
+    tsContext->tsfn =
           Napi::ThreadSafeFunction::New(env,                    // Environment
                                   info[0].As<Napi::Function>(), // JS function from caller
                                   "TSFN_FETCHDATA",                 // Resource name
                                   0,        // Max queue size (0 = unlimited).
                                   1,        // Initial thread count
-                                  testData, // Context,
+                                        tsContext, // Context,
                                   FinalizerCallback, // Finalizer
                                   (void *)nullptr    // Finalizer data
           );
-      testData->nativeThread = std::thread(fetchData, testData, this);
+    tsContext->nativeThread = std::thread(fetchData, tsContext, this);
     
-      return testData->deferred.Promise();
+    return tsContext->deferred.Promise();
 }
 
 int64_t WeWorkChat::parseJsonData(TsfnContext *context,const char *data){

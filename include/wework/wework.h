@@ -46,11 +46,11 @@ class WeWorkChat : public Napi::ObjectWrap<WeWorkChat>{
     
     std::string corpid_;
     std::string secret_;
-    static WeWorkFinanceSdk_t *sdk_;
-    static std::mutex mtx_;
-    static std::string private_key_;
-    static int64_t seq_;
-    static bool end_;
+    WeWorkFinanceSdk_t *sdk_;
+    std::mutex mtx_;
+    std::string private_key_;
+    int64_t seq_;
+    bool end_;
 };
 
 
