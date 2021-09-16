@@ -260,6 +260,7 @@ int64_t WeWorkChat::parseJsonData(TsfnContext *context,const char *data){
         string encrypt_key = rsa_pri_decrypt(encryptRandomKey, this->private_key_.c_str());
         //cout << "encrypt_key: " << encrypt_key << endl;
         if (encrypt_key.length()==0) {
+            cout <<"publickey_ver:"<<chatData[i]["publickey_ver"].GetUint()<<endl;
             cout <<"random_key:"<<encryptRandomKey<<endl;
             cout <<"encrypt_chat_msg:"<<encryptChatMsg<<endl;
             cout <<"private_key_:"<<this->private_key_<<endl;
