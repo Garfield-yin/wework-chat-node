@@ -1,3 +1,13 @@
-node_modules
-build
 .DS_Store
+logs
+
+build
+
+# Dependency directories
+node_modules/
+jspm_packages/
+
+# front end build
+build/
+dist
+

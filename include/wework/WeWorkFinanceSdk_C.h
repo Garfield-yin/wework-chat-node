@@ -1,25 +1,25 @@
 // All Rights Reserved.
-// *File ： WeWorkFinanceSdk_C.h
-// @Brief：拉取企业聊天记录与媒体消息sdk头文件
+// *File 拢潞 WeWorkFinanceSdk_C.h
+// @Brief拢潞脌颅脠隆脝贸脪碌脕脛脤矛录脟脗录脫毛脙陆脤氓脧没脧垄sdk脥路脦脛录镁
 
 #pragma once
-//返回码	错误说明
-//10000	参数错误，请求参数错误
-//10001	网络错误，网络请求错误
-//10002	数据解析失败
-//10003	系统失败
-//10004	密钥错误导致加密失败
-//10005	fileid错误
-//10006	解密失败
-//10007 找不到消息加密版本的私钥，需要重新传入私钥对
-//10008 解析encrypt_key出错
-//10009 ip非法
-//10010 数据过期
-//10011	证书错误
+//路碌禄脴脗毛	麓铆脦贸脣碌脙梅
+//10000	虏脦脢媒麓铆脦贸拢卢脟毛脟贸虏脦脢媒麓铆脦贸
+//10001	脥酶脗莽麓铆脦贸拢卢脥酶脗莽脟毛脟贸麓铆脦贸
+//10002	脢媒戮脻陆芒脦枚脢搂掳脺
+//10003	脧碌脥鲁脢搂掳脺
+//10004	脙脺脭驴麓铆脦贸碌录脰脗录脫脙脺脢搂掳脺
+//10005	fileid麓铆脦贸
+//10006	陆芒脙脺脢搂掳脺
+//10007 脮脪虏禄碌陆脧没脧垄录脫脙脺掳忙卤戮碌脛脣陆脭驴拢卢脨猫脪陋脰脴脨脗麓芦脠毛脣陆脭驴露脭
+//10008 陆芒脦枚encrypt_key鲁枚麓铆
+//10009 ip路脟路篓
+//10010 脢媒戮脻鹿媒脝脷
+//10011	脰陇脢茅麓铆脦贸
 
 typedef struct WeWorkFinanceSdk_t WeWorkFinanceSdk_t;
 
-// 数据
+// 脢媒戮脻
 typedef struct Slice_t {
     char* buf;
     int len;
@@ -42,100 +42,100 @@ extern "C" {
                                
 
 	/**
-	 * 初始化函数
-	 * Return值=0表示该API调用成功
+	 * 鲁玫脢录禄炉潞炉脢媒
+	 * Return脰碌=0卤铆脢戮赂脙API碌梅脫脙鲁脡鹿娄
 	 * 
-	 * @param [in]  sdk			NewSdk返回的sdk指针
-	 * @param [in]  corpid      调用企业的企业id，例如：wwd08c8exxxx5ab44d，可以在企业微信管理端--我的企业--企业信息查看
-	 * @param [in]  secret		聊天内容存档的Secret，可以在企业微信管理端--管理工具--聊天内容存档查看
+	 * @param [in]  sdk			NewSdk路碌禄脴碌脛sdk脰赂脮毛
+	 * @param [in]  corpid      碌梅脫脙脝贸脪碌碌脛脝贸脪碌id拢卢脌媒脠莽拢潞wwd08c8exxxx5ab44d拢卢驴脡脪脭脭脷脝贸脪碌脦垄脨脜鹿脺脌铆露脣--脦脪碌脛脝贸脪碌--脝贸脪碌脨脜脧垄虏茅驴麓
+	 * @param [in]  secret		脕脛脤矛脛脷脠脻麓忙碌碌碌脛Secret拢卢驴脡脪脭脭脷脝贸脪碌脦垄脨脜鹿脺脌铆露脣--鹿脺脌铆鹿陇戮脽--脕脛脤矛脛脷脠脻麓忙碌碌虏茅驴麓
 	 *						
 	 *
-	 * @return 返回是否初始化成功
-	 *      0   - 成功
-	 *      !=0 - 失败
+	 * @return 路碌禄脴脢脟路帽鲁玫脢录禄炉鲁脡鹿娄
+	 *      0   - 鲁脡鹿娄
+	 *      !=0 - 脢搂掳脺
 	 */
     int Init(WeWorkFinanceSdk_t* sdk, const char* corpid, const char* secret);
 
 	/**
-	 * 拉取聊天记录函数
-	 * Return值=0表示该API调用成功
+	 * 脌颅脠隆脕脛脤矛录脟脗录潞炉脢媒
+	 * Return脰碌=0卤铆脢戮赂脙API碌梅脫脙鲁脡鹿娄
 	 * 
 	 *
-	 * @param [in]  sdk				NewSdk返回的sdk指针
-	 * @param [in]  seq				从指定的seq开始拉取消息，注意的是返回的消息从seq+1开始返回，seq为之前接口返回的最大seq值。首次使用请使用seq:0
-	 * @param [in]  limit			一次拉取的消息条数，最大值1000条，超过1000条会返回错误
-	 * @param [in]  proxy			使用代理的请求，需要传入代理的链接。如：socks5://10.0.0.1:8081 或者 http://10.0.0.1:8081
-	 * @param [in]  passwd			代理账号密码，需要传入代理的账号密码。如 user_name:passwd_123
-	 * @param [in]  timeout			超时时间，单位秒
-	 * @param [out] chatDatas		返回本次拉取消息的数据，slice结构体.内容包括errcode/errmsg，以及每条消息内容。示例如下：
+	 * @param [in]  sdk				NewSdk路碌禄脴碌脛sdk脰赂脮毛
+	 * @param [in]  seq				麓脫脰赂露篓碌脛seq驴陋脢录脌颅脠隆脧没脧垄拢卢脳垄脪芒碌脛脢脟路碌禄脴碌脛脧没脧垄麓脫seq+1驴陋脢录路碌禄脴拢卢seq脦陋脰庐脟掳陆脫驴脷路碌禄脴碌脛脳卯麓贸seq脰碌隆拢脢脳麓脦脢鹿脫脙脟毛脢鹿脫脙seq:0
+	 * @param [in]  limit			脪禄麓脦脌颅脠隆碌脛脧没脧垄脤玫脢媒拢卢脳卯麓贸脰碌1000脤玫拢卢鲁卢鹿媒1000脤玫禄谩路碌禄脴麓铆脦贸
+	 * @param [in]  proxy			脢鹿脫脙麓煤脌铆碌脛脟毛脟贸拢卢脨猫脪陋麓芦脠毛麓煤脌铆碌脛脕麓陆脫隆拢脠莽拢潞socks5://10.0.0.1:8081 禄貌脮脽 http://10.0.0.1:8081
+	 * @param [in]  passwd			麓煤脌铆脮脣潞脜脙脺脗毛拢卢脨猫脪陋麓芦脠毛麓煤脌铆碌脛脮脣潞脜脙脺脗毛隆拢脠莽 user_name:passwd_123
+	 * @param [in]  timeout			鲁卢脢卤脢卤录盲拢卢碌楼脦禄脙毛
+	 * @param [out] chatDatas		路碌禄脴卤戮麓脦脌颅脠隆脧没脧垄碌脛脢媒戮脻拢卢slice陆谩鹿鹿脤氓.脛脷脠脻掳眉脌篓errcode/errmsg拢卢脪脭录掳脙驴脤玫脧没脧垄脛脷脠脻隆拢脢戮脌媒脠莽脧脗拢潞
 
 	 {"errcode":0,"errmsg":"ok","chatdata":[{"seq":196,"msgid":"CAQQ2fbb4QUY0On2rYSAgAMgip/yzgs=","publickey_ver":3,"encrypt_random_key":"ftJ+uz3n/z1DsxlkwxNgE+mL38H42/KCvN8T60gbbtPD+Rta1hKTuQPzUzO6Hzne97MgKs7FfdDxDck/v8cDT6gUVjA2tZ/M7euSD0L66opJ/IUeBtpAtvgVSD5qhlaQjvfKJc/zPMGNK2xCLFYqwmQBZXbNT7uA69Fflm512nZKW/piK2RKdYJhRyvQnA1ISxK097sp9WlEgDg250fM5tgwMjujdzr7ehK6gtVBUFldNSJS7ndtIf6aSBfaLktZgwHZ57ONewWq8GJe7WwQf1hwcDbCh7YMG8nsweEwhDfUz+u8rz9an+0lgrYMZFRHnmzjgmLwrR7B/32Qxqd79A==","encrypt_chat_msg":"898WSfGMnIeytTsea7Rc0WsOocs0bIAerF6de0v2cFwqo9uOxrW9wYe5rCjCHHH5bDrNvLxBE/xOoFfcwOTYX0HQxTJaH0ES9OHDZ61p8gcbfGdJKnq2UU4tAEgGb8H+Q9n8syRXIjaI3KuVCqGIi4QGHFmxWenPFfjF/vRuPd0EpzUNwmqfUxLBWLpGhv+dLnqiEOBW41Zdc0OO0St6E+JeIeHlRZAR+E13Isv9eS09xNbF0qQXWIyNUi+ucLr5VuZnPGXBrSfvwX8f0QebTwpy1tT2zvQiMM2MBugKH6NuMzzuvEsXeD+6+3VRqL"}]}
 
 	 *
-	 * @return 返回是否调用成功
-	 *      0   - 成功
-	 *      !=0 - 失败	
+	 * @return 路碌禄脴脢脟路帽碌梅脫脙鲁脡鹿娄
+	 *      0   - 鲁脡鹿娄
+	 *      !=0 - 脢搂掳脺	
 	 */		
     int GetChatData(WeWorkFinanceSdk_t* sdk, unsigned long long seq, unsigned int limit, const char *proxy,const char* passwd, int timeout,Slice_t* chatDatas);
 
 	/**
-     * @brief 解析密文.企业微信自有解密内容
-     * @param [in]  encrypt_key, getchatdata返回的encrypt_random_key,使用企业自持对应版本秘钥RSA解密后的内容
-     * @param [in]  encrypt_msg, getchatdata返回的encrypt_chat_msg
-     * @param [out] msg, 解密的消息明文
-	 * @return 返回是否调用成功
-	 *      0   - 成功
-	 *      !=0 - 失败
+     * @brief 陆芒脦枚脙脺脦脛.脝贸脪碌脦垄脨脜脳脭脫脨陆芒脙脺脛脷脠脻
+     * @param [in]  encrypt_key, getchatdata路碌禄脴碌脛encrypt_random_key,脢鹿脫脙脝贸脪碌脳脭鲁脰露脭脫娄掳忙卤戮脙脴脭驴RSA陆芒脙脺潞贸碌脛脛脷脠脻
+     * @param [in]  encrypt_msg, getchatdata路碌禄脴碌脛encrypt_chat_msg
+     * @param [out] msg, 陆芒脙脺碌脛脧没脧垄脙梅脦脛
+	 * @return 路碌禄脴脢脟路帽碌梅脫脙鲁脡鹿娄
+	 *      0   - 鲁脡鹿娄
+	 *      !=0 - 脢搂掳脺
      */
     int DecryptData(const char* encrypt_key, const char* encrypt_msg, Slice_t* msg);
 
 	/**
-	 * 拉取媒体消息函数
-	 * Return值=0表示该API调用成功
+	 * 脌颅脠隆脙陆脤氓脧没脧垄潞炉脢媒
+	 * Return脰碌=0卤铆脢戮赂脙API碌梅脫脙鲁脡鹿娄
 	 * 
 	 *
-	 * @param [in]  sdk				NewSdk返回的sdk指针
-	 * @param [in]  sdkFileid		从GetChatData返回的聊天消息中，媒体消息包括的sdkfileid
-	 * @param [in]  proxy			使用代理的请求，需要传入代理的链接。如：socks5://10.0.0.1:8081 或者 http://10.0.0.1:8081
-	 * @param [in]  passwd			代理账号密码，需要传入代理的账号密码。如 user_name:passwd_123
-	 * @param [in]  indexbuf		媒体消息分片拉取，需要填入每次拉取的索引信息。首次不需要填写，默认拉取512k，后续每次调用只需要将上次调用返回的outindexbuf填入即可。
-	 * @param [in]  timeout			超时时间，单位秒
-	 * @param [out] media_data		返回本次拉取的媒体数据.MediaData结构体.内容包括data(数据内容)/outindexbuf(下次索引)/is_finish(拉取完成标记)
+	 * @param [in]  sdk				NewSdk路碌禄脴碌脛sdk脰赂脮毛
+	 * @param [in]  sdkFileid		麓脫GetChatData路碌禄脴碌脛脕脛脤矛脧没脧垄脰脨拢卢脙陆脤氓脧没脧垄掳眉脌篓碌脛sdkfileid
+	 * @param [in]  proxy			脢鹿脫脙麓煤脌铆碌脛脟毛脟贸拢卢脨猫脪陋麓芦脠毛麓煤脌铆碌脛脕麓陆脫隆拢脠莽拢潞socks5://10.0.0.1:8081 禄貌脮脽 http://10.0.0.1:8081
+	 * @param [in]  passwd			麓煤脌铆脮脣潞脜脙脺脗毛拢卢脨猫脪陋麓芦脠毛麓煤脌铆碌脛脮脣潞脜脙脺脗毛隆拢脠莽 user_name:passwd_123
+	 * @param [in]  indexbuf		脙陆脤氓脧没脧垄路脰脝卢脌颅脠隆拢卢脨猫脪陋脤卯脠毛脙驴麓脦脌颅脠隆碌脛脣梅脪媒脨脜脧垄隆拢脢脳麓脦虏禄脨猫脪陋脤卯脨麓拢卢脛卢脠脧脌颅脠隆512k拢卢潞贸脨酶脙驴麓脦碌梅脫脙脰禄脨猫脪陋陆芦脡脧麓脦碌梅脫脙路碌禄脴碌脛outindexbuf脤卯脠毛录麓驴脡隆拢
+	 * @param [in]  timeout			鲁卢脢卤脢卤录盲拢卢碌楼脦禄脙毛
+	 * @param [out] media_data		路碌禄脴卤戮麓脦脌颅脠隆碌脛脙陆脤氓脢媒戮脻.MediaData陆谩鹿鹿脤氓.脛脷脠脻掳眉脌篓data(脢媒戮脻脛脷脠脻)/outindexbuf(脧脗麓脦脣梅脪媒)/is_finish(脌颅脠隆脥锚鲁脡卤锚录脟)
 	 
 	 *
-	 * @return 返回是否调用成功
-	 *      0   - 成功
-	 *      !=0 - 失败
+	 * @return 路碌禄脴脢脟路帽碌梅脫脙鲁脡鹿娄
+	 *      0   - 鲁脡鹿娄
+	 *      !=0 - 脢搂掳脺
 	 */
 	int GetMediaData(WeWorkFinanceSdk_t* sdk, const char* indexbuf,
                      const char* sdkFileid,const char *proxy,const char* passwd, int timeout, MediaData_t* media_data);
 
     /**
-     * @brief 释放sdk，和NewSdk成对使用
+     * @brief 脢脥路脜sdk拢卢潞脥NewSdk鲁脡露脭脢鹿脫脙
      * @return 
      */
     void DestroySdk(WeWorkFinanceSdk_t* sdk);
 
 
-    //--------------下面接口为了其他语言例如python等调用c接口，酌情使用--------------
+    //--------------脧脗脙忙陆脫驴脷脦陋脕脣脝盲脣没脫茂脩脭脌媒脠莽python碌脠碌梅脫脙c陆脫驴脷拢卢脳脙脟茅脢鹿脫脙--------------
     Slice_t* NewSlice();
 
     /**
-     * @brief 释放slice，和NewSlice成对使用
+     * @brief 脢脥路脜slice拢卢潞脥NewSlice鲁脡露脭脢鹿脫脙
      * @return 
      */
     void FreeSlice(Slice_t* slice);
 
     /**
-     * @brief 为其他语言提供读取接口
-     * @return 返回buf指针
-     *     !=NULL - 成功
-     *     NULL   - 失败
+     * @brief 脦陋脝盲脣没脫茂脩脭脤谩鹿漏露脕脠隆陆脫驴脷
+     * @return 路碌禄脴buf脰赂脮毛
+     *     !=NULL - 鲁脡鹿娄
+     *     NULL   - 脢搂掳脺
      */
     char* GetContentFromSlice(Slice_t* slice);
 	int GetSliceLen(Slice_t* slice);
 
-	// 媒体记录相关工具
+	// 脙陆脤氓录脟脗录脧脿鹿脴鹿陇戮脽
 
     MediaData_t*  NewMediaData();
 
