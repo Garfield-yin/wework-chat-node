@@ -142,4 +142,4 @@ export interface WeWorkChat {
 
 export const WeWorkChat: {
 	new (param: InitParams): WeWorkChat;
-} = addon.WeWorkChat;
+};
