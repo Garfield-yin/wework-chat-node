@@ -213,9 +213,16 @@ Napi::Value WeWorkChat::GetChat(const Napi::CallbackInfo& info){
     }
     const rapidjson::Value &chatData = doc["chatdata"];
     Napi::Array data_array = Napi::Array::New(info.Env(), chatData.Size());
-    for (SizeType i = 0; i < chatData.Size(); ++i)
+    Napi::Object retObj = Napi::Object::New(env);
+    
+    unsigned int dataSize =chatData.Size();
+    int64_t last_seq = 0;
+    if (dataSize >0) {
+        last_seq =chatData[dataSize-1]["seq"].GetInt64();
+    }
+    for (SizeType i = 0; i < dataSize; ++i)
     {
-        //int64_t seq = chatData[i]["seq"].GetInt64();
+        //cout << "current seq:" <<chatData[i]["seq"].GetInt64()<<endl;
         string encryptRandomKey = chatData[i]["encrypt_random_key"].GetString();
         //cout << "encrypt_random_key: " << encryptRandomKey << endl;
         string encryptChatMsg = chatData[i]["encrypt_chat_msg"].GetString();
@@ -240,10 +247,11 @@ Napi::Value WeWorkChat::GetChat(const Napi::CallbackInfo& info){
         char *msg_data = GetContentFromSlice(slice_msg);
         data_array[i] = Napi::String::New(info.Env(), msg_data);
         FreeSlice(slice_msg);
-        std::this_thread::sleep_for(std::chrono::milliseconds(80));
     }
+    retObj.Set("last_seq", Napi::Number::New(env,last_seq));
+    retObj.Set("data", data_array);
     FreeSlice(chatDatas);
-    return data_array;
+    return retObj;
 }
 
 void* WeWorkChat::fetchData(TsfnContext *context, void *this__) {

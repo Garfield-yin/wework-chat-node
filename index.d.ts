@@ -31,14 +31,13 @@ export interface MediaDataResp {
 	data: Buffer;
 }
 
-export interface ChatDataResp {
+export interface ChatDataItem {
 	msgid: string;
 	action: string;
 	from: string;
 	tolist: string[];
 	roomid: string;
 	msgtime: number;
-	// 暂支持不全
 	msgtype:
 		| "text"
 		| "image"
@@ -54,8 +53,20 @@ export interface ChatDataResp {
 		| "chatrecord"
 		| "todo"
 		| "vote"
+		| "collect"
 		| "redpacket"
-		| "card";
+		| "card"
+		| "meeting"
+		| "docmsg"
+		| "markdown"
+		| "news"
+		| "calendar"
+		| "mixed"
+		| "meeting_voice_call"
+		| "voip_doc_share"
+		| "external_redpacket"
+		| "sphfeed";
+
 	text?: {
 		content: string;
 	};
@@ -127,7 +138,48 @@ export interface ChatDataResp {
 		content: string;
 	};
 	vote?: any;
-	redpacket?: any;
+	collect?: {
+		room_name: string;
+		creator: string;
+		create_time: string;
+		title: string;
+		details: {
+			id: number;
+			ques: string;
+			type: "Text" | "Number" | "Date" | "Time" | "String";
+		}[];
+	};
+	redpacket?: {
+		type: number;
+		wish: string;
+		totalcnt: number;
+		totalamount: number;
+	};
+	meeting?: {
+		topic: string;
+		starttime: number;
+		endtime: number;
+		address: string;
+		remarks: string;
+		meetingtype: number;
+		meetingid: number;
+		status: number;
+	};
+	docmsg?: any;
+	markdown?: any;
+	news?: any;
+	calendar?: any;
+	mixed?: any;
+	meeting_voice_call?: any;
+	voip_doc_share?: any;
+	external_redpacket?: any;
+	sphfeed?: any;
+}
+
+export interface ChatDataResp {
+	/** 最后一条数据的 seq */
+	last_seq: number;
+	data: string[];
 }
 
 export interface CallbackFunc {
@@ -137,7 +189,7 @@ export interface WeWorkChat {
 	getMediaData(params: GetMediaDataParams): MediaDataResp;
 	fetchData(fn: CallbackFunc): any;
 	stopFetch(): number;
-	getChatData(params: GetDataParams): Array<string>;
+	getChatData(params: GetDataParams): ChatDataResp;
 }
 
 export const WeWorkChat: {

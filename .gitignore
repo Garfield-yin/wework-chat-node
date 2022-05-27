@@ -3,6 +3,7 @@ logs
 
 build
 
+Dockerfile
 # Dependency directories
 node_modules/
 jspm_packages/
