@@ -12,3 +12,5 @@ jspm_packages/
 build/
 dist
 
+demon.js
+Dockerfile
