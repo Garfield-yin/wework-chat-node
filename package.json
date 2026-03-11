@@ -1,6 +1,6 @@
 {
   "name": "wework-chat-node",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "WeWorkFinanceSdk node c++ addon",
   "main": "index.js",
   "gypfile": true,
@@ -22,7 +22,7 @@
     "node": "~10 >=10.20 || >=12.17"
   },
   "dependencies": {
-    "bindings": "~1.2.1",
-    "node-addon-api": "^3.2.1"
+    "bindings": "~1.5.0",
+    "node-addon-api": "^7.0.0"
   }
 }

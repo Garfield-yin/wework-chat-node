@@ -131,7 +131,6 @@ WeWorkChat::WeWorkChat(const Napi::CallbackInfo& info)
         this->private_key_ = obj.Get("private_key").ToString();
         this->seq_ = obj.Get("seq").ToNumber();
         
-        //cout <<"corpid:"<< this->corpid_<<",secret:"<< this->secret_<<",seq:"<<this->seq_ << endl;
         
         this->end_ = false;
         this->initSdk(info);
@@ -162,7 +161,7 @@ Napi::Value WeWorkChat::GetChat(const Napi::CallbackInfo& info){
     std::int64_t seq = obj.Get("seq").ToNumber();
     std::int64_t timeout = obj.Get("timeout").ToNumber();
     if (!seq) seq= 0;
-    
+
     Slice_t *chatDatas = NewSlice();
     // getchatdata api
     const int numOfRetries = 3;
@@ -187,10 +186,9 @@ Napi::Value WeWorkChat::GetChat(const Napi::CallbackInfo& info){
         Napi::Error::New(env, errMsg).ThrowAsJavaScriptException();
         return env.Null();
     }
-    
+
     char *data = GetContentFromSlice(chatDatas);
     // parse data
- 
     rapidjson::Document doc;
     if (doc.Parse(data).HasParseError())
     {
@@ -211,6 +209,7 @@ Napi::Value WeWorkChat::GetChat(const Napi::CallbackInfo& info){
             return env.Null();
         }
     }
+
     const rapidjson::Value &chatData = doc["chatdata"];
     Napi::Array data_array = Napi::Array::New(info.Env(), chatData.Size());
     for (SizeType i = 0; i < chatData.Size(); ++i)
@@ -223,9 +222,6 @@ Napi::Value WeWorkChat::GetChat(const Napi::CallbackInfo& info){
         string encrypt_key = rsa_pri_decrypt(encryptRandomKey, this->private_key_.c_str());
         //cout << "encrypt_key: " << encrypt_key << endl;
         if (encrypt_key.length()==0) {
-            cout <<"random_key:"<<encryptRandomKey<<endl;
-            cout <<"encrypt_chat_msg:"<<encryptChatMsg<<endl;
-            cout <<"private_key_:"<<this->private_key_<<endl;
             continue;
         }
         Slice_t *slice_msg = NewSlice();
@@ -353,9 +349,6 @@ int64_t WeWorkChat::parseJsonData(TsfnContext *context,const char *data){
         string encrypt_key = rsa_pri_decrypt(encryptRandomKey, this->private_key_.c_str());
         //cout << "encrypt_key: " << encrypt_key << endl;
         if (encrypt_key.length()==0) {
-            cout <<"random_key:"<<encryptRandomKey<<endl;
-            cout <<"encrypt_chat_msg:"<<encryptChatMsg<<endl;
-            cout <<"private_key_:"<<this->private_key_<<endl;
             continue;
         }
         Slice_t *slice_msg = NewSlice();

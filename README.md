@@ -3,6 +3,8 @@
 
 [企业微信获取会话内容文档链接]https://work.weixin.qq.com/api/doc/90000/90135/91774
 
+最近在 docker 环境 [node 24.13.1-slim](node:24.13.1-slim) 做了测试。
+
 ### Installation
 ```
 npm install wework-chat-node
