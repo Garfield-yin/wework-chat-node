@@ -3,6 +3,15 @@
   "version": "1.2.1",
   "description": "WeWorkFinanceSdk node c++ addon",
   "main": "index.js",
+  "files": [
+    "binding.gyp",
+    "index.js",
+    "index.d.ts",
+    "main.cc",
+    "wework.cc",
+    "include/",
+    "lib/"
+  ],
   "gypfile": false,
   "author": "Garfield Yin",
   "repository": {
