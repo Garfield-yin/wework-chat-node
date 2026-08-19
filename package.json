@@ -43,7 +43,7 @@
     "test:docker": "docker run --rm -v \"$PWD\":/src:ro -w /tmp/w node:24 sh -c \"cp -r /src /tmp/w && cd /tmp/w && npm install --no-audit --no-fund && npm test\""
   },
   "engines": {
-    "node": ">=16"
+    "node": ">=18"
   },
   "dependencies": {
     "bindings": "~1.5.0",

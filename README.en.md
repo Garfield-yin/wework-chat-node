@@ -35,7 +35,7 @@ and decrypt archived conversations directly.
 | | |
 | ---- | ---- |
 | OS | Linux (x86_64 / arm64) |
-| Node.js | >= 12.17; CI covers 18 / 20 / 22 / 24 |
+| Node.js | >= 18; CI covers 18 / 20 / 22 / 24 |
 | Build tools | `python3`, `make`, `g++` (compiled at install time) |
 
 ## Installation
