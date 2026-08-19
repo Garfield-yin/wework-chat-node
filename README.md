@@ -1,138 +1,190 @@
 # wework-chat-node
 
-使用 node-addon-api 封装了企业微信会话存档金融版 SDK 接口，提供给 node.js 直接调用。
+[![CI](https://github.com/Garfield-yin/wework-chat-node/actions/workflows/ci.yml/badge.svg)](https://github.com/Garfield-yin/wework-chat-node/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/wework-chat-node.svg)](https://www.npmjs.com/package/wework-chat-node)
+[![node](https://img.shields.io/node/v/wework-chat-node.svg)](https://www.npmjs.com/package/wework-chat-node)
+[![license](https://img.shields.io/npm/l/wework-chat-node.svg)](LICENSE)
 
-[企业微信获取会话内容文档链接]https://work.weixin.qq.com/api/doc/90000/90135/91774
+使用 [node-addon-api](https://github.com/nodejs/node-addon-api) 封装企业微信
+**会话内容存档**（金融版）SDK，让 Node.js 可以直接拉取和解密会话记录。
 
-最近在 docker 环境 [node 24.13.1-slim](node:24.13.1-slim) 做了测试。
+[English](README.en.md) · [API 文档](docs/API.md) · [常见问题](docs/FAQ.md) · [更新日志](CHANGELOG.md)
 
-### Installation
+---
 
-```
+## 特性
+
+- 拉取并自动解密会话记录（RSA 解密 + SDK 解密一步到位）
+- 支持一次性批量拉取（`getChatData`）和后台持续轮询（`fetchData`）两种模式
+- 支持媒体文件（图片 / 语音 / 视频 / 文件）的分片下载
+- 完整的 TypeScript 类型定义
+- 同时提供 x86_64 与 arm64 的 SDK
+
+## 运行环境
+
+> [!IMPORTANT]
+> **只支持 Linux。** 企业微信官方只提供 Linux 版的 `.so`，因此本模块无法在
+> macOS / Windows 上运行。`npm install` 在非 Linux 平台会自动跳过编译步骤，
+> 安装不会失败，但模块不可用。本地开发请使用 Docker。
+
+| 项目 | 要求 |
+| ---- | ---- |
+| 操作系统 | Linux（x86_64 / arm64） |
+| Node.js | >= 12.17，CI 覆盖 18 / 20 / 22 / 24 |
+| 编译工具 | `python3`、`make`、`g++`（安装时需要现场编译） |
+
+## 安装
+
+```bash
 npm install wework-chat-node
 ```
 
-如果需要升级企业微信 SDK,请按架构更新 `lib/x86/libWeWorkFinanceSdk_C.so`（或 `lib/arm/`）以及对应的
-`include/wework/x86/WeWorkFinanceSdk_C.h`（或 `include/wework/arm/`），文件更新后再 build。
-本模块也会持续更新优化。
+Debian / Ubuntu 上如果缺少编译工具：
 
-##### Compiling
+```bash
+sudo apt-get install -y python3 build-essential
+```
 
-企业微信只提供了 Linux 版的 `.so`，所以本模块只能在 Linux 下运行。`npm install` 里的编译步骤已经做了平台判断，
-在 macOS / Windows 上会跳过 `node-gyp rebuild`，安装本身不会失败，但也无法调用。本地开发建议直接用 Docker
-（README 顶部的 node slim 镜像即可）。
-
-### Example
+## 快速开始
 
 ```javascript
-import fs from "fs";
-import {
-	GetMediaDataParams,
-	GetDataParams,
-	WeWorkChat,
-	ChatDataItem,
-} from "wework-chat-node";
-
-const privateKey =
-	"-----BEGIN RSA PRIVATE KEY-----\n" +
-	"xxxxxxxxxxxxxxxxxxxxxxxxxxxx\n" +
-	"-----END RSA PRIVATE KEY-----\n";
+const { WeWorkChat } = require("wework-chat-node");
 
 const wework = new WeWorkChat({
-	/** 企业ID */
-	corpid: "corpid",
-	/** Secret */
-	secret: "secret",
-	/**私钥，用于消息解密 */
-	private_key: privateKey,
-	/** 数据拉取index */
+	corpid: process.env.WEWORK_CORPID,
+	secret: process.env.WEWORK_SECRET,
+	// PEM 格式，含首尾行；不要硬编码在代码里
+	private_key: process.env.WEWORK_PRIVATE_KEY,
 	seq: 0,
 });
 
-const getMediaData = (
-	fileName: string,
-	params: GetMediaDataParams,
-	bufs: Buffer[] = []
-) => {
-	const resp = wework.getMediaData(params);
-	const bufVal = Buffer.from(resp.data);
-	bufs.push(bufVal);
-	if (!resp.is_finished) {
-		// 分片读写,为了防止大文件 buffer 撑爆，建议使用 stream append 方式写文件
-		params.index_buf = resp.buf_index;
-		getMediaData(fileName, params, bufs);
-	} else {
-		const bufVal = Buffer.concat(bufs);
+const ret = wework.getChatData({ max_results: 1000, timeout: 30, seq: 0 });
 
-		fs.createWriteStream(fileName).write(bufVal);
-	}
-};
-const test = () => {
-	const params: GetDataParams = {
-		max_results: 10,
-		timeout: 30,
-		seq: 1,
-	};
-	const ret = wework.getChatData(params);
-	console.log(ret.last_seq);
-	for (const msg of ret.data) {
-		if (!msg) continue;
-		const msgData: ChatDataItem = JSON.parse(msg);
-		if (msgData.msgtype != "file") continue;
-		if (msgData.file && msgData.file.fileext != "pptx") continue;
-		const fileInfo = msgData.file;
-		if (!fileInfo) continue;
-		getMediaData(fileInfo.filename, {
-			sdk_fileid: fileInfo.sdkfileid,
-			index_buf: "",
-		});
-	}
-};
+for (const msg of ret.data) {
+	if (!msg) continue; // 解密失败的消息会留空
+	const item = JSON.parse(msg);
+	console.log(item.msgid, item.msgtype, item.from);
+}
 
-test();
+console.log("本批最后一条 seq:", ret.last_seq);
+wework.stopFetch(); // 释放 SDK
 ```
 
-### 常见问题
-
-##### Segmentation fault (core dumped)
-
-已知会导致 core dump 的几种情况都已在 v1.2.1 修掉，如果仍然遇到，请先确认升级到最新版本：
-
-- `stopFetch()` 之前会在 800ms 后就 `DestroySdk`，而一次 `GetChatData` 最长要等 30s，
-  后台线程会继续使用已经被释放的 sdk。现在 `stopFetch()` 会等后台线程真正退出再释放。
-- 重复调用 `stopFetch()` 会把 sdk double free，现在只会释放一次。
-- 服务端返回的 JSON 缺字段（例如没有 `chatdata`）时，rapidjson 在 Release 构建下不做成员检查，
-  会直接野指针解引用。现在所有字段读取都走存在性判断。
-- 参数类型不对（比如 `getChatData()` 不传对象）时，抛出的 JS 异常并不会中断 C++ 执行流，
-  下一行就会把非对象当对象用。现在这些分支都会立即返回。
-- `new WeWorkChat()` 初始化失败后继续调用其它方法，现在会抛出明确的错误而不是崩溃。
-
-##### 怎么拿到最终的 seq
-
-两种方式：
-
-- `stopFetch()` 的返回值。它会阻塞等待后台线程退出（最长 45s）后再返回，
-  所以拿到的是本次 fetch 真正处理完的最后一个 seq。
-- `getChatData()` 返回的 `last_seq`，即本批最后一条消息的 seq。
-  注意本批为空时 `last_seq` 是 `0`，轮询时请自行保留上一次的 seq，不要无条件赋值回去：
+### 持续拉取
 
 ```javascript
-let seq = 0;
+wework.fetchData((msg) => {
+	const item = JSON.parse(msg);
+	console.log(item.msgid, item.msgtype);
+});
+
+process.on("SIGTERM", () => {
+	const finalSeq = wework.stopFetch(); // 阻塞直到后台线程退出
+	saveSeq(finalSeq);
+});
+```
+
+### 增量轮询
+
+`last_seq` 在本批为空时是 `0`，不要无条件赋值回去，否则会从头重拉：
+
+```javascript
+let seq = await loadSeq();
+
 while (true) {
 	const ret = wework.getChatData({ max_results: 1000, timeout: 30, seq });
 	if (!ret.data.length) break;
+
+	for (const msg of ret.data) {
+		if (!msg) continue;
+		await handle(JSON.parse(msg));
+	}
+
 	seq = ret.last_seq; // 只在有数据时推进
-	// ... 处理 ret.data
+	await saveSeq(seq); // 落库，重启后从这里继续
 }
 ```
 
-生产环境建议每处理完一条就把 seq 落库/写 Redis，重启后从落库的 seq 继续；
-或者允许少量重复，接收端按 `msgid` 去重。
+### 下载媒体文件
 
-##### 消息解密失败 / 拿到的 data 里有空值
+```javascript
+const fs = require("fs");
 
-解密失败最常见的原因是私钥版本对不上。企业微信允许存在多个版本的密钥，每条消息的
-`publickey_ver` 指明它该用哪个版本的私钥解密。现在解密失败时会打印该条消息的 `seq` 和
-`publickey_ver`，按提示换成对应版本的私钥即可。解密失败的消息在 `data` 里会留空，遍历时请跳过。
+function download(fileName, sdkFileId) {
+	const stream = fs.createWriteStream(fileName);
+	let indexBuf = "";
+	while (true) {
+		const resp = wework.getMediaData({ sdk_fileid: sdkFileId, index_buf: indexBuf });
+		stream.write(Buffer.from(resp.data));
+		if (resp.is_finished) break;
+		indexBuf = resp.buf_index; // 分片续传
+	}
+	stream.end();
+}
+```
 
-### TO DO
+大文件请像上面这样逐片写入，不要把所有分片攒在内存里再 `Buffer.concat`。
+
+### TypeScript
+
+自带类型定义，无需额外安装 `@types`：
+
+```typescript
+import { WeWorkChat, ChatDataItem, GetDataParams } from "wework-chat-node";
+
+const params: GetDataParams = { max_results: 100, timeout: 30, seq: 0 };
+const ret = wework.getChatData(params);
+
+for (const msg of ret.data) {
+	if (!msg) continue;
+	const item: ChatDataItem = JSON.parse(msg);
+	if (item.msgtype === "file" && item.file) {
+		console.log(item.file.filename);
+	}
+}
+```
+
+## API 概览
+
+| 方法 | 说明 |
+| ---- | ---- |
+| `new WeWorkChat(options)` | 创建实例并初始化 SDK |
+| `getChatData(params)` | 同步拉取一批会话记录并解密 |
+| `fetchData(callback)` | 启动后台线程持续轮询，每条消息回调一次 |
+| `stopFetch()` | 停止轮询并释放 SDK，返回最终的 seq（阻塞） |
+| `getMediaData(params[, cb])` | 拉取媒体文件，支持分片 |
+
+完整参数、返回值和异常说明见 **[API 文档](docs/API.md)**。
+
+## 安全提示
+
+- **不要把私钥或 secret 写进代码库。** 请从环境变量或密钥管理服务读取。
+- **解密后的消息是明文聊天记录**，落库、传输、备份都应按敏感数据处理。
+- 本模块在解密失败时只输出 `seq` 和 `publickey_ver`，不会输出私钥。
+  如果你自己加日志，请注意不要泄露。
+
+详见 [SECURITY.md](SECURITY.md)。
+
+## 遇到问题？
+
+- 崩溃、编译失败、`max_results` 不生效、消息解密不出来 → **[常见问题](docs/FAQ.md)**
+- 接口语义、错误码 → [企业微信官方文档](https://developer.work.weixin.qq.com/document/path/91774)
+- 还是没解决 → [提 issue](https://github.com/Garfield-yin/wework-chat-node/issues/new/choose)
+
+> 如果你正在使用 v1.2.1 之前的版本，**强烈建议升级** —— 早期版本存在多处会导致
+> 进程 core dump 和内存无上限增长的问题，详见 [CHANGELOG](CHANGELOG.md)。
+
+## 开发
+
+```bash
+npm install      # 安装依赖并编译 addon（仅 Linux）
+npm run build    # 重新编译
+npm test         # 运行测试（不需要凭据，不联网）
+npm run test:docker  # 在 Docker 里跑，macOS / Windows 用这个
+```
+
+参与贡献请看 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+## 许可证
+
+[MIT](LICENSE) © Garfield Yin

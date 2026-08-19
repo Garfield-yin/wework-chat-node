@@ -3,6 +3,7 @@
   "version": "1.2.1",
   "description": "WeWorkFinanceSdk node c++ addon",
   "main": "index.js",
+  "types": "index.d.ts",
   "files": [
     "binding.gyp",
     "index.js",
@@ -10,27 +11,39 @@
     "main.cc",
     "wework.cc",
     "include/",
-    "lib/"
+    "lib/",
+    "CHANGELOG.md"
   ],
   "gypfile": false,
   "author": "Garfield Yin",
+  "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Garfield-yin/wework-chat-node.git"
+    "url": "git+https://github.com/Garfield-yin/wework-chat-node.git"
   },
+  "bugs": {
+    "url": "https://github.com/Garfield-yin/wework-chat-node/issues"
+  },
+  "homepage": "https://github.com/Garfield-yin/wework-chat-node#readme",
   "keywords": [
     "WeWorkFinanceSdk",
-    "get Chat data"
+    "wework",
+    "wecom",
+    "企业微信",
+    "会话存档",
+    "会话内容存档",
+    "chat-archive",
+    "node-addon-api"
   ],
-  "license": "MIT",
   "scripts": {
     "install": "node -e \"if(process.platform==='linux'){require('child_process').execSync('node-gyp rebuild',{stdio:'inherit'})}\"",
     "build": "node-gyp rebuild",
-    "prebenchmark": "node-gyp build",
-    "pretest-server": "node-gyp build"
+    "rebuild": "node-gyp rebuild",
+    "test": "node test/run.js",
+    "test:docker": "docker run --rm -v \"$PWD\":/src:ro -w /tmp/w node:24 sh -c \"cp -r /src /tmp/w && cd /tmp/w && npm install --no-audit --no-fund && npm test\""
   },
   "engines": {
-    "node": "~10 >=10.20 || >=12.17"
+    "node": ">=16"
   },
   "dependencies": {
     "bindings": "~1.5.0",

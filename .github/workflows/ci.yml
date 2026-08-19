@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# 同一分支上只保留最新一次运行
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # 企业微信只提供 Linux 的 .so，所以只在 Linux 上构建和测试
+    name: node ${{ matrix.node }} / ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['18', '20', '22', '24']
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+        # include 里的条目会把 arch 补进所有 runner 匹配的组合，仅用于命名
+        include:
+          - runner: ubuntu-24.04
+            arch: x64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: 显示工具链版本
+        run: |
+          node -v
+          npm -v
+          python3 -V
+          g++ --version | head -1
+
+      - name: 安装依赖并编译 addon
+        run: npm ci
+
+      - name: 确认 addon 链接到了正确架构的 .so
+        run: |
+          ldd build/Release/wework.node
+          ldd build/Release/wework.node | grep -q libWeWorkFinanceSdk_C.so
+
+      - name: 运行测试
+        run: npm test
+
+  package:
+    # 校验发布产物：files 白名单不能漏掉编译所需的文件
+    name: 打包产物可安装
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: 打包
+        run: npm pack --pack-destination /tmp
+
+      - name: 在干净目录中安装打包产物
+        run: |
+          mkdir -p /tmp/consumer && cd /tmp/consumer
+          npm init -y > /dev/null
+          npm install /tmp/wework-chat-node-*.tgz
+
+      - name: 验证安装后可用
+        working-directory: /tmp/consumer
+        run: |
+          node -e '
+            const { WeWorkChat } = require("wework-chat-node");
+            if (typeof WeWorkChat !== "function") throw new Error("未导出 WeWorkChat");
+            try { new WeWorkChat(); throw new Error("缺参数时应当抛错"); }
+            catch (e) { if (!/Expected one object argument/.test(e.message)) throw e; }
+            const w = new WeWorkChat({corpid:"x",secret:"y",private_key:"z",seq:0});
+            w.stopFetch(); w.stopFetch();
+            console.log("打包产物验证通过");
+          '

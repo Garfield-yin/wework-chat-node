@@ -1,0 +1,72 @@
+name: Bug 反馈
+description: 报告一个问题（崩溃、报错、行为不符合预期）
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！请尽量用**文本**粘贴报错信息而不是截图 —— 截图几年后会失效，
+        而且没法搜索和复制。
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 问题描述
+      description: 发生了什么？你期望发生什么？
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      description: 能复现的最小代码片段最有帮助。请**务必删除 corpid、secret 和私钥**。
+      render: javascript
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 完整报错输出
+      description: |
+        编译报错请贴完整的 `node-gyp` 输出；
+        运行时崩溃（Segmentation fault）请尽量附上 backtrace：
+        `ulimit -c unlimited` 后复现，再用 `gdb node core.xxx` 执行 `bt`。
+      render: shell
+
+  - type: input
+    id: version
+    attributes:
+      label: wework-chat-node 版本
+      placeholder: "1.2.1（`npm ls wework-chat-node`）"
+    validations:
+      required: true
+
+  - type: input
+    id: node-version
+    attributes:
+      label: Node 版本
+      placeholder: "v20.11.0（`node -v`）"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: 操作系统与架构
+      placeholder: "Ubuntu 22.04 / x86_64（`uname -a`）"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 确认项
+      options:
+        - label: 我运行在 Linux 上（企业微信只提供 Linux 版 SDK，macOS / Windows 不支持）
+          required: true
+        - label: 我已经看过 [常见问题](../../blob/main/docs/FAQ.md)
+          required: true
+        - label: 我已确认贴出的内容里不包含 secret 或私钥
+          required: true
