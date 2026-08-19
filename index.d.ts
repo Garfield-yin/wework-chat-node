@@ -10,18 +10,18 @@ export interface InitParams {
 }
 
 export interface GetDataParams {
-	/** 返回条数，最大1000 */
-	max_results: number;
-	/** 超时时间 单位 s */
-	timeout: number;
-	/** 数据拉取index */
-	seq: number;
+	/** 返回条数，最大 1000。不传或超出 1~1000 时按 1000 处理 */
+	max_results?: number;
+	/** 超时时间 单位 s，不传默认 30 */
+	timeout?: number;
+	/** 数据拉取 index，从该 seq 之后开始拉取。不传默认 0 */
+	seq?: number;
 }
 
 export interface GetMediaDataParams {
 	/** 媒体资源的id信息 */
 	sdk_fileid: string;
-	/**媒体消息分片拉取，需要填入每次拉取的索引信息 */
+	/** 媒体消息分片拉取，需要填入每次拉取的索引信息。首次拉取可不传 */
 	index_buf?: string;
 }
 
@@ -177,9 +177,16 @@ export interface ChatDataItem {
 }
 
 export interface ChatDataResp {
-	/** 最后一条数据的 seq */
+	/**
+	 * 本批最后一条数据的 seq。
+	 * 本批没有数据时为 0，轮询时请自行保留上一次的 seq，不要直接赋值回去。
+	 */
 	last_seq: number;
-	data: string[];
+	/**
+	 * 解密后的消息 JSON 字符串数组，每一项可用 JSON.parse 得到 ChatDataItem。
+	 * 私钥版本不匹配等原因导致解密失败的消息会留空，遍历时请跳过空值。
+	 */
+	data: (string | undefined)[];
 }
 
 export interface CallbackFunc {
@@ -187,7 +194,23 @@ export interface CallbackFunc {
 }
 export interface WeWorkChat {
 	getMediaData(params: GetMediaDataParams): MediaDataResp;
-	fetchData(fn: CallbackFunc): any;
+	/**
+	 * 回调形式：成功时回调 (null, resp) 并返回 null；失败时回调 (errMsg) 并返回 -1。
+	 */
+	getMediaData(
+		params: GetMediaDataParams,
+		cb: (err: string | null, resp?: MediaDataResp) => void
+	): null | number;
+	/**
+	 * 启动后台线程持续拉取消息，每条消息回调一次。
+	 * 同一实例同时只能有一个 fetchData 在跑，返回的 Promise 在 stopFetch 之后 resolve。
+	 */
+	fetchData(fn: CallbackFunc): Promise<boolean>;
+	/**
+	 * 停止 fetchData 并释放 sdk，返回停止时已拉取到的最后一个 seq。
+	 * 会阻塞等待后台线程真正退出（最长 45s），以保证返回的 seq 是最终值、
+	 * 且 sdk 不会在使用中被释放。调用之后该实例不能再发起请求。
+	 */
 	stopFetch(): number;
 	getChatData(params: GetDataParams): ChatDataResp;
 }

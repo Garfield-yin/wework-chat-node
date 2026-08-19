@@ -8,7 +8,10 @@
       "include_dirs": [
         "<!@(node -p \"require('node-addon-api').include\")"
       ],
-      "defines": [ "NAPI_DISABLE_CPP_EXCEPTIONS" ],
+      "defines": [
+        "NAPI_DISABLE_CPP_EXCEPTIONS",
+        "OPENSSL_API_COMPAT=0x10100000L"
+      ],
       "conditions": [
         ["target_arch=='arm64'", {
           "libraries": [ "<(module_root_dir)/lib/arm/libWeWorkFinanceSdk_C.so" ],
