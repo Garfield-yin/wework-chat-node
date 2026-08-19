@@ -8,7 +8,7 @@
 使用 [node-addon-api](https://github.com/nodejs/node-addon-api) 封装企业微信
 **会话内容存档**（金融版）SDK，让 Node.js 可以直接拉取和解密会话记录。
 
-[English](README.en.md) · [API 文档](docs/API.md) · [常见问题](docs/FAQ.md) · [更新日志](CHANGELOG.md)
+[English](README.en.md) · [API 文档](docs/API.md) · [示例](examples/) · [常见问题](docs/FAQ.md) · [更新日志](CHANGELOG.md)
 
 ---
 
@@ -154,7 +154,7 @@ for (const msg of ret.data) {
 | `stopFetch()` | 停止轮询并释放 SDK，返回最终的 seq（阻塞） |
 | `getMediaData(params[, cb])` | 拉取媒体文件，支持分片 |
 
-完整参数、返回值和异常说明见 **[API 文档](docs/API.md)**。
+完整参数、返回值和异常说明见 **[API 文档](docs/API.md)**，可运行的示例见 **[examples/](examples/)**。
 
 ## 安全提示
 

@@ -7,6 +7,10 @@
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-19
+
+本次没有改动运行时的 C++ 代码，主要是工程化与文档，外加一次依赖大版本升级。
+
 ### Added
 
 - GitHub Actions CI：在 node 18 / 20 / 22 / 24 × x64 / arm64 共 8 个组合上
@@ -18,6 +22,8 @@
 - 补齐开源项目文档：`LICENSE`、`CONTRIBUTING.md`、`CODE_OF_CONDUCT.md`、
   `SECURITY.md`、`CHANGELOG.md`、`docs/API.md`、`docs/FAQ.md`、
   issue / PR 模板、Dependabot 配置。
+- 新增 `examples/`：增量批量拉取、后台轮询与优雅停止、媒体文件分片下载。
+  凭据统一从环境变量读取。
 
 ### Changed
 
@@ -117,7 +123,8 @@
 - 2020-10-22 对 `10001`~`10003` 错误码增加重试策略；修复获取媒体文件数据的错误。
 - 2020-10-20 项目初始化。
 
-[Unreleased]: https://github.com/Garfield-yin/wework-chat-node/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/Garfield-yin/wework-chat-node/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/Garfield-yin/wework-chat-node/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/Garfield-yin/wework-chat-node/compare/1.2.0...v1.2.1
 [1.2.0]: https://github.com/Garfield-yin/wework-chat-node/compare/v1.1.2...1.2.0
 [1.1.2]: https://github.com/Garfield-yin/wework-chat-node/compare/v1.1.1...v1.1.2

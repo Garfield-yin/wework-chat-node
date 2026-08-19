@@ -9,7 +9,7 @@ A Node.js native addon ([node-addon-api](https://github.com/nodejs/node-addon-ap
 wrapping WeCom's (WeChat Work / 企业微信) **Chat Archive** SDK, so Node can fetch
 and decrypt archived conversations directly.
 
-[中文](README.md) · [API reference (Chinese)](docs/API.md) · [FAQ (Chinese)](docs/FAQ.md) · [Changelog (Chinese)](CHANGELOG.md)
+[中文](README.md) · [API reference (Chinese)](docs/API.md) · [Examples](examples/) · [FAQ (Chinese)](docs/FAQ.md) · [Changelog (Chinese)](CHANGELOG.md)
 
 > Most documentation is in Chinese, since WeCom's Chat Archive is only available
 > to mainland-China registered companies. This page covers the essentials in English.
@@ -153,7 +153,7 @@ releasing the SDK, so the returned seq is final and the worker never touches
 freed memory. Safe to call more than once, but the instance cannot be used
 afterwards.
 
-Full details (in Chinese) in [docs/API.md](docs/API.md).
+Full details (in Chinese) in [docs/API.md](docs/API.md). Runnable examples live in [examples/](examples/).
 
 ## Troubleshooting
 
