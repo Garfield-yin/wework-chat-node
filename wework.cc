@@ -5,9 +5,9 @@
 
 #include <limits>
 #include <thread>
-#include <mutex>
 #include <chrono>
 
+#include <cmath>
 #include <stdexcept>
 #include <cctype>
 #include "openssl/md5.h"
@@ -38,12 +38,6 @@
 using namespace std;
 using namespace rapidjson;
 
-//WeWorkFinanceSdk_t *WeWorkChat::sdk_;
-//std::string WeWorkChat::private_key_;
-//int64_t WeWorkChat::seq_;
-//bool WeWorkChat::end_;
-//std::mutex WeWorkChat::mtx_;
-
 std::string ERROR_PREFIX = "WEWORK_CHAT_NODE::";
 
 //// thread/////
@@ -55,6 +49,11 @@ void FinalizerCallback(Napi::Env env, void *finalizeData,
                        TsfnContext *context) {
   // Join the thread
   context->nativeThread.join();
+
+  // fetch 期间对 JS 对象加了强引用，线程结束后必须解除，否则实例永远不会被回收
+  if (context->owner != nullptr) {
+    context->owner->ReleaseFetchRef();
+  }
 
   // Resolve the Promise previously returned to JS via the CreateTSFN method.
   context->deferred.Resolve(Napi::Boolean::New(env, true));
@@ -78,7 +77,122 @@ static const char reverse_table[128] = {
    41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 64, 64, 64, 64, 64
 };
 
-const int max_results = 1000;
+// 企业微信单次拉取上限，超过 1000 服务端会直接返回错误
+const int kMaxResults = 1000;
+// getChatData 未传 timeout 时的默认超时（秒）
+const int kDefaultTimeout = 30;
+// fetchData 后台轮询的超时（秒）
+const int kFetchTimeout = 30;
+// stopFetch 等待后台线程退出的上限（毫秒）
+const int kStopWaitMs = 45000;
+
+namespace {
+
+// NewSlice 分配的 Slice_t 必须配对 FreeSlice。之前每个 return / continue 分支
+// 都要手写一次 FreeSlice，只要漏掉一个就会泄漏，改成 RAII 之后任何出口都不会漏。
+class SliceGuard {
+public:
+    SliceGuard() : slice_(NewSlice()) {}
+    ~SliceGuard() { reset(); }
+    SliceGuard(const SliceGuard &) = delete;
+    SliceGuard &operator=(const SliceGuard &) = delete;
+
+    Slice_t *get() const { return slice_; }
+    bool valid() const { return slice_ != nullptr; }
+    // 把所有权交出去（例如交给 ThreadSafeFunction 回调负责释放）
+    Slice_t *release() {
+        Slice_t *s = slice_;
+        slice_ = nullptr;
+        return s;
+    }
+    void reset() {
+        if (slice_ != nullptr) {
+            FreeSlice(slice_);
+            slice_ = nullptr;
+        }
+    }
+
+private:
+    Slice_t *slice_;
+};
+
+// rapidjson 在 NDEBUG（Release 构建）下 operator[] 不做成员存在性检查，
+// 服务端一旦少返回一个字段就是野指针解引用，直接 Segmentation fault。
+// 下面几个 helper 统一走 FindMember，缺字段时返回默认值。
+const rapidjson::Value *FindMember(const rapidjson::Value &v, const char *name) {
+    if (!v.IsObject()) {
+        return nullptr;
+    }
+    rapidjson::Value::ConstMemberIterator it = v.FindMember(name);
+    if (it == v.MemberEnd()) {
+        return nullptr;
+    }
+    return &it->value;
+}
+
+const char *GetStringMember(const rapidjson::Value &v, const char *name, const char *fallback) {
+    const rapidjson::Value *m = FindMember(v, name);
+    if (m == nullptr || !m->IsString()) {
+        return fallback;
+    }
+    return m->GetString();
+}
+
+int64_t GetInt64Member(const rapidjson::Value &v, const char *name, int64_t fallback) {
+    const rapidjson::Value *m = FindMember(v, name);
+    if (m == nullptr) {
+        return fallback;
+    }
+    if (m->IsInt64()) {
+        return m->GetInt64();
+    }
+    if (m->IsUint64()) {
+        return static_cast<int64_t>(m->GetUint64());
+    }
+    return fallback;
+}
+
+// 读取数值参数：字段缺失 / 不是数字 / NaN 时都退回默认值。
+// 直接 ToNumber() 拿 undefined 会得到 NaN，转成 int64_t 是未定义行为。
+int64_t GetNumberOption(const Napi::Object &obj, const char *key, int64_t fallback) {
+    if (!obj.Has(key)) {
+        return fallback;
+    }
+    Napi::Value v = obj.Get(key);
+    if (!v.IsNumber()) {
+        return fallback;
+    }
+    double d = v.As<Napi::Number>().DoubleValue();
+    if (std::isnan(d)) {
+        return fallback;
+    }
+    return static_cast<int64_t>(d);
+}
+
+// 读取字符串参数：字段缺失时返回 fallback。
+// 直接 ToString() 拿 undefined 会得到字面量 "undefined" 并被当成真实参数传给 sdk。
+std::string GetStringOption(const Napi::Object &obj, const char *key, const char *fallback) {
+    if (!obj.Has(key)) {
+        return fallback;
+    }
+    Napi::Value v = obj.Get(key);
+    if (v.IsUndefined() || v.IsNull()) {
+        return fallback;
+    }
+    return v.ToString().Utf8Value();
+}
+
+// 解密失败最常见的原因是私钥版本对不上，publickey_ver 指明这条消息该用哪个版本的私钥。
+// 注意只打印版本号，不要把 private_key 打进日志。
+void LogDecryptKeyFailure(const rapidjson::Value &item) {
+    printf("%sdecrypt encrypt_random_key failed, seq:%lld publickey_ver:%lld, "
+           "请确认 private_key 是该 publickey_ver 对应版本的私钥\n",
+           ERROR_PREFIX.c_str(),
+           static_cast<long long>(GetInt64Member(item, "seq", -1)),
+           static_cast<long long>(GetInt64Member(item, "publickey_ver", -1)));
+}
+
+}  // namespace
 
 Napi::Object WeWorkChat::Init(Napi::Env env, Napi::Object exports) {
   Napi::Function func =
@@ -102,10 +216,20 @@ int WeWorkChat::initSdk(const Napi::CallbackInfo& info){
     int ret = 0;
     // new sdk api
     this->sdk_ = ::NewSdk();
+    if (this->sdk_ == nullptr) {
+        printf("%sNewSdk returned null\n", ERROR_PREFIX.c_str());
+        Napi::TypeError::New(info.Env(), "Create WeWorkFinance sdk error.")
+            .ThrowAsJavaScriptException();
+        return -1;
+    }
     ret = ::Init(this->sdk_, this->corpid_.c_str(), this->secret_.c_str());
     if (ret != 0)
     {
         printf("%sinit sdk err ret:%d\n", ERROR_PREFIX.c_str(), ret);
+        // 初始化失败后不要留着半初始化的指针，否则后续任何调用都是崩溃
+        ::DestroySdk(this->sdk_);
+        this->sdk_ = nullptr;
+        this->sdk_destroyed_ = true;
         Napi::TypeError::New(info.Env(), "Init WeWorkFinance sdk error.")
             .ThrowAsJavaScriptException();
         return  -1;
@@ -113,9 +237,37 @@ int WeWorkChat::initSdk(const Napi::CallbackInfo& info){
     return 0;
 }
 
+bool WeWorkChat::ensureSdk(Napi::Env env) {
+    if (this->sdk_ == nullptr) {
+        Napi::Error::New(env, ERROR_PREFIX + "sdk unavailable: init failed or stopFetch() already released it")
+            .ThrowAsJavaScriptException();
+        return false;
+    }
+    return true;
+}
+
+void WeWorkChat::destroySdk() {
+    bool expected = false;
+    // 重复调用 stopFetch 会 double free sdk，用 CAS 保证只释放一次
+    if (this->sdk_ != nullptr && this->sdk_destroyed_.compare_exchange_strong(expected, true)) {
+        ::DestroySdk(this->sdk_);
+        this->sdk_ = nullptr;
+    }
+}
+
+void WeWorkChat::ReleaseFetchRef() {
+    this->Unref();
+}
+
 WeWorkChat::WeWorkChat(const Napi::CallbackInfo& info)
     : Napi::ObjectWrap<WeWorkChat>(info) {
         Napi::Env env = info.Env();
+
+        this->sdk_ = nullptr;
+        this->seq_ = 0;
+        this->end_ = false;
+        this->fetching_ = false;
+        this->sdk_destroyed_ = false;
 
         int length = info.Length();
 
@@ -125,25 +277,62 @@ WeWorkChat::WeWorkChat(const Napi::CallbackInfo& info)
         }
 
         Napi::Object obj = info[0].As<Napi::Object>();
-        //value.ToObject()
-        this->corpid_ = obj.Get("corpid").ToString();
-        this->secret_ = obj.Get("secret").ToString();
-        this->private_key_ = obj.Get("private_key").ToString();
-        this->seq_ = obj.Get("seq").ToNumber();
-        
-        
-        this->end_ = false;
+
+        // 必填参数缺失时直接报错，不要带着空的 corpid/secret 去 Init
+        const char *required[] = {"corpid", "secret", "private_key"};
+        for (const char *key : required) {
+            if (!obj.Has(key) || !obj.Get(key).IsString()) {
+                Napi::TypeError::New(env, std::string("Missing or invalid option: ") + key)
+                    .ThrowAsJavaScriptException();
+                return;
+            }
+        }
+
+        this->corpid_ = obj.Get("corpid").As<Napi::String>().Utf8Value();
+        this->secret_ = obj.Get("secret").As<Napi::String>().Utf8Value();
+        this->private_key_ = obj.Get("private_key").As<Napi::String>().Utf8Value();
+
+        int64_t seq = GetNumberOption(obj, "seq", 0);
+        this->seq_ = seq < 0 ? 0 : seq;
+
         this->initSdk(info);
+}
+
+WeWorkChat::~WeWorkChat() {
+    // 用户忘了调 stopFetch 时兜底释放 sdk。
+    this->end_ = true;
+    if (this->fetching_.load()) {
+        // 正常情况下 fetch 期间对象被 Ref 住不会走到这里，但进程/env 退出时
+        // 析构会被强制执行。此时后台线程可能还在用 sdk，宁可漏掉一次释放，
+        // 也不能让它拿到野指针。
+        return;
+    }
+    this->destroySdk();
 }
 
 
 Napi::Value WeWorkChat::EndFetchData(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
     this->end_ = true;
-    // sleep 一下，确保正在执行的线程执行完毕
-    std::this_thread::sleep_for(std::chrono::milliseconds(800));
+
+    // 必须等后台线程真正退出再 DestroySdk。原来只 sleep 800ms，而一次
+    // GetChatData 最长要等 30s，sdk 被提前释放后线程继续用它就是
+    // Segmentation fault (core dumped)。
+    int waited = 0;
+    while (this->fetching_.load() && waited < kStopWaitMs) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        waited += 50;
+    }
+
+    if (this->fetching_.load()) {
+        printf("%sstopFetch: fetch thread still running after %dms, skip DestroySdk\n",
+               ERROR_PREFIX.c_str(), waited);
+        return Napi::Number::New(env, static_cast<double>(this->seq_.load()));
+    }
+
     // sdk 由用户手动释放
-    DestroySdk(this->sdk_);
-    return Napi::Number::New(info.Env(), this->seq_);
+    this->destroySdk();
+    return Napi::Number::New(env, static_cast<double>(this->seq_.load()));
 }
 
 Napi::Value WeWorkChat::GetChat(const Napi::CallbackInfo& info){
@@ -153,22 +342,42 @@ Napi::Value WeWorkChat::GetChat(const Napi::CallbackInfo& info){
 
     if (length <= 0 || !info[0].IsObject()) {
         Napi::TypeError::New(env, "Expected one object argument").ThrowAsJavaScriptException();
+        // 编译时定义了 NAPI_DISABLE_CPP_EXCEPTIONS，ThrowAsJavaScriptException 不会中断
+        // C++ 执行流，这里不 return 的话下一行就会把非对象当对象用
+        return env.Null();
+    }
+
+    if (!this->ensureSdk(env)) {
+        return env.Null();
     }
 
     Napi::Object obj = info[0].As<Napi::Object>();
-   
-    std::string sdk_fileid = obj.Get("max_results").ToString();
-    std::int64_t seq = obj.Get("seq").ToNumber();
-    std::int64_t timeout = obj.Get("timeout").ToNumber();
-    if (!seq) seq= 0;
 
-    Slice_t *chatDatas = NewSlice();
+    // 之前这行把 max_results 读进了一个叫 sdk_fileid 且没人使用的字符串，
+    // 下面调用 GetChatData 时用的是常量 1000，所以传什么都没效果
+    int64_t max_results = GetNumberOption(obj, "max_results", kMaxResults);
+    if (max_results <= 0 || max_results > kMaxResults) {
+        max_results = kMaxResults;
+    }
+    std::int64_t seq = GetNumberOption(obj, "seq", 0);
+    if (seq < 0) seq = 0;
+    std::int64_t timeout = GetNumberOption(obj, "timeout", kDefaultTimeout);
+    if (timeout <= 0) timeout = kDefaultTimeout;
+
+    SliceGuard chatDatas;
+    if (!chatDatas.valid()) {
+        Napi::Error::New(env, ERROR_PREFIX + "NewSlice failed").ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
     // getchatdata api
     const int numOfRetries = 3;
     int cnt = 1;
     int ret = 0;
     do {
-        ret = GetChatData(this->sdk_, seq, max_results, "", "", timeout, chatDatas);
+        ret = GetChatData(this->sdk_, static_cast<unsigned long long>(seq),
+                          static_cast<unsigned int>(max_results), "", "",
+                          static_cast<int>(timeout), chatDatas.get());
         if   (ret >= 10001 && ret <= 10003){
             //cout << "\t try number#" << cnt <<" fail \n";
             std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -177,17 +386,21 @@ Napi::Value WeWorkChat::GetChat(const Napi::CallbackInfo& info){
             break;
         }
     }while (cnt <= numOfRetries);
-    
+
     if (ret != 0)
     {
         printf("%sGetChatData err ret:%d\n",ERROR_PREFIX.c_str(), ret);
         char errMsg[256];
-        sprintf(errMsg, "%sGetChatData err ret:%d\n",ERROR_PREFIX.c_str(), ret);
+        snprintf(errMsg, sizeof(errMsg), "%sGetChatData err ret:%d",ERROR_PREFIX.c_str(), ret);
         Napi::Error::New(env, errMsg).ThrowAsJavaScriptException();
         return env.Null();
     }
 
-    char *data = GetContentFromSlice(chatDatas);
+    char *data = GetContentFromSlice(chatDatas.get());
+    if (data == nullptr) {
+        Napi::Error::New(env, ERROR_PREFIX + "GetContentFromSlice returned null").ThrowAsJavaScriptException();
+        return env.Null();
+    }
     // parse data
     rapidjson::Document doc;
     if (doc.Parse(data).HasParseError())
@@ -200,74 +413,102 @@ Napi::Value WeWorkChat::GetChat(const Napi::CallbackInfo& info){
     }
     if (doc.HasMember("errcode"))
     {
-        int errcode = doc["errcode"].GetInt();
+        int errcode = static_cast<int>(GetInt64Member(doc, "errcode", 0));
         if (errcode != 0)
         {
-            string errMsg = doc["errmsg"].GetString();
-            printf("%sget chat message error:%s.\n",ERROR_PREFIX.c_str(), errMsg.c_str());
-            Napi::Error::New(env, "get chat message error").ThrowAsJavaScriptException();
+            const char *errMsg = GetStringMember(doc, "errmsg", "unknown error");
+            printf("%sget chat message error:%s.\n",ERROR_PREFIX.c_str(), errMsg);
+            char msg[256];
+            snprintf(msg, sizeof(msg), "get chat message error, errcode:%d errmsg:%s", errcode, errMsg);
+            Napi::Error::New(env, msg).ThrowAsJavaScriptException();
             return env.Null();
         }
     }
 
-    const rapidjson::Value &chatData = doc["chatdata"];
-    Napi::Array data_array = Napi::Array::New(info.Env(), chatData.Size());
     Napi::Object retObj = Napi::Object::New(env);
-    
-    unsigned int dataSize =chatData.Size();
+
+    const rapidjson::Value *chatDataPtr = FindMember(doc, "chatdata");
+    if (chatDataPtr == nullptr || !chatDataPtr->IsArray()) {
+        // errcode 为 0 但没有 chatdata（比如已经拉到最新），按空结果返回，
+        // 不要让 doc["chatdata"] 在 Release 构建下直接崩掉
+        retObj.Set("last_seq", Napi::Number::New(env, 0));
+        retObj.Set("data", Napi::Array::New(env, 0));
+        return retObj;
+    }
+    const rapidjson::Value &chatData = *chatDataPtr;
+
+    unsigned int dataSize = chatData.Size();
+    Napi::Array data_array = Napi::Array::New(env, dataSize);
+
     int64_t last_seq = 0;
-    if (dataSize >0) {
-        last_seq =chatData[dataSize-1]["seq"].GetInt64();
+    if (dataSize > 0) {
+        last_seq = GetInt64Member(chatData[dataSize - 1], "seq", 0);
     }
     for (SizeType i = 0; i < dataSize; ++i)
     {
-        //cout << "current seq:" <<chatData[i]["seq"].GetInt64()<<endl;
-        string encryptRandomKey = chatData[i]["encrypt_random_key"].GetString();
-        //cout << "encrypt_random_key: " << encryptRandomKey << endl;
-        string encryptChatMsg = chatData[i]["encrypt_chat_msg"].GetString();
-        //cout << "encrypt_chat_msg: " << encryptChatMsg << endl;
+        const rapidjson::Value &item = chatData[i];
+        string encryptRandomKey = GetStringMember(item, "encrypt_random_key", "");
+        string encryptChatMsg = GetStringMember(item, "encrypt_chat_msg", "");
+        if (encryptRandomKey.empty() || encryptChatMsg.empty()) {
+            printf("%sskip malformed chatdata item, seq:%lld\n", ERROR_PREFIX.c_str(),
+                   static_cast<long long>(GetInt64Member(item, "seq", -1)));
+            continue;
+        }
         string encrypt_key = rsa_pri_decrypt(encryptRandomKey, this->private_key_.c_str());
-        //cout << "encrypt_key: " << encrypt_key << endl;
         if (encrypt_key.length()==0) {
+            LogDecryptKeyFailure(item);
             continue;
         }
-        Slice_t *slice_msg = NewSlice();
-        
-        int ret = DecryptData(encrypt_key.c_str(), encryptChatMsg.c_str(), slice_msg);
-        if (ret != 0){
-            cout << ERROR_PREFIX <<"Decrypt Data error:"<<ret<< endl;
+        SliceGuard slice_msg;
+        if (!slice_msg.valid()) {
+            printf("%sNewSlice failed\n", ERROR_PREFIX.c_str());
             continue;
         }
-  
-        
-        char *msg_data = GetContentFromSlice(slice_msg);
-        data_array[i] = Napi::String::New(info.Env(), msg_data);
-        FreeSlice(slice_msg);
+
+        int decRet = DecryptData(encrypt_key.c_str(), encryptChatMsg.c_str(), slice_msg.get());
+        if (decRet != 0){
+            cout << ERROR_PREFIX <<"Decrypt Data error:"<<decRet<< endl;
+            continue;
+        }
+
+        char *msg_data = GetContentFromSlice(slice_msg.get());
+        if (msg_data == nullptr) {
+            printf("%sGetContentFromSlice returned null\n", ERROR_PREFIX.c_str());
+            continue;
+        }
+        data_array[i] = Napi::String::New(env, msg_data);
     }
-    retObj.Set("last_seq", Napi::Number::New(env,last_seq));
+    retObj.Set("last_seq", Napi::Number::New(env, static_cast<double>(last_seq)));
     retObj.Set("data", data_array);
-    FreeSlice(chatDatas);
     return retObj;
 }
 
 void* WeWorkChat::fetchData(TsfnContext *context, void *this__) {
     WeWorkChat * this_ =  static_cast<WeWorkChat*>(this__);
-    
+
     while (true) {
-        if (this_->end_){
-            cout << "End fetch data:"<<this_->seq_<< endl;
+        if (this_->end_.load()){
+            cout << "End fetch data:"<<this_->seq_.load()<< endl;
             break;
         }
         // 微信限制频率为最高100ms/每次
         std::this_thread::sleep_for(std::chrono::milliseconds(150));
 
-        Slice_t *chatDatas = NewSlice();
+        SliceGuard chatDatas;
+        if (!chatDatas.valid()) {
+            printf("%sNewSlice failed\n", ERROR_PREFIX.c_str());
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            continue;
+        }
+
         // getchatdata api
         const int numOfRetries = 3;
         int cnt = 1;
         int ret = 0;
         do {
-            ret = GetChatData(this_->sdk_, this_->seq_, max_results, "", "", 30, chatDatas);
+            ret = GetChatData(this_->sdk_, static_cast<unsigned long long>(this_->seq_.load()),
+                              static_cast<unsigned int>(kMaxResults), "", "",
+                              kFetchTimeout, chatDatas.get());
             if   (ret >= 10001 && ret <= 10003){
                 //cout << "\t try number#" << cnt <<" fail \n";
                 std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -276,30 +517,57 @@ void* WeWorkChat::fetchData(TsfnContext *context, void *this__) {
                 break;
             }
         }while (cnt <= numOfRetries);
-        
+
         if (ret != 0)
         {
             printf("%sGetChatData err ret:%d\n",ERROR_PREFIX.c_str(), ret);
+            // SliceGuard 析构会释放，之前这里 continue 会漏掉 FreeSlice，
+            // 每次错误响应泄漏一个 Slice_t，长时间运行会不断增长
             continue;
         }
-        
-        char *data = GetContentFromSlice(chatDatas);
-        
+
+        char *data = GetContentFromSlice(chatDatas.get());
+        if (data == nullptr) {
+            printf("%sGetContentFromSlice returned null\n", ERROR_PREFIX.c_str());
+            continue;
+        }
+
         int64_t seq = this_->parseJsonData(context,data);
         if (seq <0) {
             continue;
         }
-        
-        FreeSlice(chatDatas);
     }
-    
+
+    // 先标记线程已退出，stopFetch 看到这个标记后才会去 DestroySdk
+    this_->fetching_ = false;
     context->tsfn.Release();
     return 0;
 }
 
 Napi::Value WeWorkChat::StartFetchData(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
+
+    if (info.Length() <= 0 || !info[0].IsFunction()) {
+        Napi::TypeError::New(env, "Expected a callback function").ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    if (!this->ensureSdk(env)) {
+        return env.Null();
+    }
+
+    // 重复调用会起多个线程同时改写 seq_，而且只有一个线程会被 join
+    if (this->fetching_.load()) {
+        Napi::Error::New(env, ERROR_PREFIX + "fetchData is already running, call stopFetch() first")
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    this->end_ = false;
+    this->fetching_ = true;
+
     auto tsContext = new TsfnContext(env);
+    tsContext->owner = this;
 
       // Create a new ThreadSafeFunction.
     tsContext->tsfn =
@@ -312,15 +580,26 @@ Napi::Value WeWorkChat::StartFetchData(const Napi::CallbackInfo& info) {
                                   FinalizerCallback, // Finalizer
                                   (void *)nullptr    // Finalizer data
           );
+
+    // 后台线程直接使用 this，期间必须阻止 JS 对象被 GC 回收，
+    // 否则线程会访问已释放的实例
+    this->Ref();
     tsContext->nativeThread = std::thread(fetchData, tsContext, this);
-    
+
     return tsContext->deferred.Promise();
 }
 
 int64_t WeWorkChat::parseJsonData(TsfnContext *context,const char *data){
     auto callback = [](Napi::Env env, Napi::Function jsCallback, MsgData *msg) {
-        jsCallback.Call({Napi::String::New(env, msg->msg_data)});
+        if (msg == nullptr) {
+            return;
+        }
+        // env 为空表示 tsfn 正在销毁，此时不能再回调 JS，但仍要把内存还回去
+        if (env != nullptr && msg->msg_data != nullptr) {
+            jsCallback.Call({Napi::String::New(env, msg->msg_data)});
+        }
         FreeSlice(msg->slice_msg);
+        delete msg;
     };
 
     rapidjson::Document doc;
@@ -333,58 +612,84 @@ int64_t WeWorkChat::parseJsonData(TsfnContext *context,const char *data){
     }
     if (doc.HasMember("errcode"))
     {
-        int errcode = doc["errcode"].GetInt();
+        int errcode = static_cast<int>(GetInt64Member(doc, "errcode", 0));
         if (errcode != 0)
         {
-            string errMsg = doc["errmsg"].GetString();
-            printf("%sget chat message error:%s.\n",ERROR_PREFIX.c_str(), errMsg.c_str());
+            printf("%sget chat message error:%s.\n",ERROR_PREFIX.c_str(),
+                   GetStringMember(doc, "errmsg", "unknown error"));
             return -1;
         }
     }
-    const rapidjson::Value &chatData = doc["chatdata"];
-  
+
+    const rapidjson::Value *chatDataPtr = FindMember(doc, "chatdata");
+    if (chatDataPtr == nullptr || !chatDataPtr->IsArray()) {
+        // 没有新消息时按空批次处理，不能直接 doc["chatdata"]
+        return this->seq_.load();
+    }
+    const rapidjson::Value &chatData = *chatDataPtr;
+
     for (SizeType i = 0; i < chatData.Size(); ++i)
     {
-        int64_t seq = chatData[i]["seq"].GetInt64();
-        this->mtx_.lock();
-        this->seq_ = seq;
-        // cout << "data seq: " << seq << endl;
-        this->mtx_.unlock();
-        string encryptRandomKey = chatData[i]["encrypt_random_key"].GetString();
-        //cout << "encrypt_random_key: " << encryptRandomKey << endl;
-        string encryptChatMsg = chatData[i]["encrypt_chat_msg"].GetString();
-        //cout << "encrypt_chat_msg: " << encryptChatMsg << endl;
-        string encrypt_key = rsa_pri_decrypt(encryptRandomKey, this->private_key_.c_str());
-        //cout << "encrypt_key: " << encrypt_key << endl;
-        if (encrypt_key.length()==0) {
+        // 一批最多 1000 条、每条 sleep 80ms，不检查 end_ 的话 stopFetch 之后
+        // 还要跑 80s 才停得下来
+        if (this->end_.load()) {
+            break;
+        }
+
+        const rapidjson::Value &item = chatData[i];
+        int64_t seq = GetInt64Member(item, "seq", -1);
+        if (seq < 0) {
+            printf("%sskip chatdata item without seq\n", ERROR_PREFIX.c_str());
             continue;
         }
-        Slice_t *slice_msg = NewSlice();
-        
-        int ret = DecryptData(encrypt_key.c_str(), encryptChatMsg.c_str(), slice_msg);
+        this->seq_ = seq;
+
+        string encryptRandomKey = GetStringMember(item, "encrypt_random_key", "");
+        string encryptChatMsg = GetStringMember(item, "encrypt_chat_msg", "");
+        if (encryptRandomKey.empty() || encryptChatMsg.empty()) {
+            printf("%sskip malformed chatdata item, seq:%lld\n", ERROR_PREFIX.c_str(),
+                   static_cast<long long>(seq));
+            continue;
+        }
+        string encrypt_key = rsa_pri_decrypt(encryptRandomKey, this->private_key_.c_str());
+        if (encrypt_key.length()==0) {
+            LogDecryptKeyFailure(item);
+            continue;
+        }
+        SliceGuard slice_msg;
+        if (!slice_msg.valid()) {
+            printf("%sNewSlice failed\n", ERROR_PREFIX.c_str());
+            continue;
+        }
+
+        int ret = DecryptData(encrypt_key.c_str(), encryptChatMsg.c_str(), slice_msg.get());
         if (ret != 0){
             cout << ERROR_PREFIX <<"Decrypt Data error:"<<ret<< endl;
             continue;
         }
-        //cout << "DecryptData ret: " << ret << endl;
-        //int64_t msg_len = GetSliceLen(slice_msg);
-        //cout << "msg_len: " << msg_len << endl;
-        
-        char *msg_data = GetContentFromSlice(slice_msg);
+
+        char *msg_data = GetContentFromSlice(slice_msg.get());
+        if (msg_data == nullptr) {
+            printf("%sGetContentFromSlice returned null\n", ERROR_PREFIX.c_str());
+            continue;
+        }
+
         MsgData *theData = new MsgData();
-        theData->msg_data =msg_data;
-        theData->slice_msg =slice_msg;
-        // 确保执行完 callback 再释放 slice_msg
+        theData->msg_data = msg_data;
+        // 所有权移交给回调：确保执行完 callback 再释放 slice_msg
+        theData->slice_msg = slice_msg.release();
+
         napi_status status =
             context->tsfn.BlockingCall(theData, callback);
-        
+
         if (status != napi_ok) {
-            FreeSlice(slice_msg);
+            FreeSlice(theData->slice_msg);
+            delete theData;
             Napi::Error::Fatal("parseJsonData", "Napi::ThreadSafeNapi::Function.BlockingCall() failed");
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(80));
     }
-    return this->seq_;
+    return this->seq_.load();
 }
 
 Napi::Value WeWorkChat::GetMediaData(const Napi::CallbackInfo& info) {
@@ -394,23 +699,40 @@ Napi::Value WeWorkChat::GetMediaData(const Napi::CallbackInfo& info) {
 
     if (length <= 0 || !info[0].IsObject()) {
         Napi::TypeError::New(env, "Expected one object argument").ThrowAsJavaScriptException();
+        // 同 GetChat，这里必须 return，否则下一行会把非对象当对象解引用
+        return env.Null();
+    }
+
+    if (!this->ensureSdk(env)) {
+        return env.Null();
     }
 
     Napi::Object obj = info[0].As<Napi::Object>();
-   
-    std::string sdk_fileid = obj.Get("sdk_fileid").ToString();
-    std::string index_buf = obj.Get("index_buf").ToString();
-    
+
+    std::string sdk_fileid = GetStringOption(obj, "sdk_fileid", "");
+    // index_buf 是可选参数，之前不传时 ToString() 会得到字面量 "undefined"
+    // 并被当成真实的分片索引传给 sdk
+    std::string index_buf = GetStringOption(obj, "index_buf", "");
+
+    if (sdk_fileid.empty()) {
+        Napi::TypeError::New(env, "Missing or invalid option: sdk_fileid").ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
     Napi::Function cb;
     bool isCbFunction = false;
-    if (info[1].IsFunction()){
+    if (info.Length() > 1 && info[1].IsFunction()){
         cb = info[1].As<Napi::Function>();
         isCbFunction = true;
     }
-       
+
     // 记得释放
     MediaData_t* media = NewMediaData();
-    
+    if (media == nullptr) {
+        Napi::Error::New(env, ERROR_PREFIX + "NewMediaData failed").ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
     const int numOfRetries = 3;
     int cnt = 1;
     int ret = 0;
@@ -424,7 +746,7 @@ Napi::Value WeWorkChat::GetMediaData(const Napi::CallbackInfo& info) {
             break;
         }
     }while (cnt <= numOfRetries);
-  
+
     if (ret != 0) {
         printf("%sGetMediaData err ret:%d\n",ERROR_PREFIX.c_str(), ret);
         ::FreeMediaData(media);
@@ -433,19 +755,30 @@ Napi::Value WeWorkChat::GetMediaData(const Napi::CallbackInfo& info) {
             return Napi::Number::New(env,-1);
         } else{
             char errMsg[128];
-            sprintf(errMsg, "Get media data error,errorcode:%d", ret);
+            snprintf(errMsg, sizeof(errMsg), "Get media data error,errorcode:%d", ret);
             Napi::Error::New(env, errMsg).ThrowAsJavaScriptException();
             return env.Null();
         }
-        
+
     }
-    //int media_data_len = ::GetDataLen(media);
-    //int index_len = ::GetIndexLen(media);
-     
-    //printf("content size:%d isfin:%d outindex:%s index_len:%d\n",media_data_len, is_finish,out_index_buf,index_len);
-    //char* media_data = ::GetData(media);
+
+    char *media_data = ::GetData(media);
+    int media_data_len = ::GetDataLen(media);
+    if (media_data == nullptr || media_data_len < 0) {
+        printf("%sGetMediaData returned empty buffer\n", ERROR_PREFIX.c_str());
+        ::FreeMediaData(media);
+        if (isCbFunction){
+            cb.Call(env.Global(), {Napi::String::New(env, "GetMediaData returned empty buffer")});
+            return Napi::Number::New(env,-1);
+        }
+        Napi::Error::New(env, ERROR_PREFIX + "GetMediaData returned empty buffer").ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
     std:: string out_index_buf = "";
-    Napi::ArrayBuffer buf_data = Napi::ArrayBuffer::New(env, GetData(media), GetDataLen(media),MediaDataFinalizerCallback,media);
+    // ArrayBuffer 接管 media 的生命周期，由 MediaDataFinalizerCallback 释放
+    Napi::ArrayBuffer buf_data = Napi::ArrayBuffer::New(env, media_data, static_cast<size_t>(media_data_len),
+                                                       MediaDataFinalizerCallback, media);
     bool is_finish;
     if(IsMediaDataFinish(media)==1)
     {
@@ -453,10 +786,11 @@ Napi::Value WeWorkChat::GetMediaData(const Napi::CallbackInfo& info) {
         out_index_buf = "";
        //break;
     } else {
-        out_index_buf = ::GetOutIndexBuf(media);
+        const char *next_index = ::GetOutIndexBuf(media);
+        out_index_buf = next_index == nullptr ? "" : next_index;
         is_finish = false;
     }
-    
+
     Napi::Object retObj = Napi::Object::New(env);
     retObj.Set("is_finished", Napi::Boolean::New(env,is_finish));
     retObj.Set("buf_index",Napi::String::New(env,out_index_buf));
@@ -468,7 +802,7 @@ Napi::Value WeWorkChat::GetMediaData(const Napi::CallbackInfo& info) {
     } else{
         return retObj;
     }
-    
+
 }
 
 
@@ -488,10 +822,17 @@ std::string rsa_pri_decrypt(const std::string &cipherText,const char *priKey)
     if(rsa == NULL)
     {
         printf("%sFailed to create RSA.\n",ERROR_PREFIX.c_str());
+        BIO_free_all(keybio);
         return "";
     }
     int len = RSA_size(rsa);
     char *decryptedText = (char *)malloc(len + 1);
+    if (decryptedText == NULL)
+    {
+        BIO_free_all(keybio);
+        RSA_free(rsa);
+        return "";
+    }
     memset(decryptedText, 0, len + 1);
 
     // 解密函数
@@ -533,4 +874,3 @@ std::string decode64(const std::string &ascdata)
    }
    return retval;
 }
-
